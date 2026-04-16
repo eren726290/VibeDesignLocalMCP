@@ -138,8 +138,13 @@ export const Element = React.memo(function Element({ element, children, isRoot }
 
   const style: React.CSSProperties = {
     ...element.style,
-    ...(isFrame ? { position: 'relative' as const } :
-        hasNonZeroPos ? { position: 'absolute' as const } : {}),
+    ...(isRoot
+      ? { position: 'absolute' as const, top: 0, left: 0, width: '100%', height: '100%' }  // fills artboard
+      : isFrame
+      ? { position: 'relative' as const }
+      : hasNonZeroPos
+      ? { position: 'absolute' as const }
+      : {}),
     cursor: 'move',
     userSelect: 'none',
   };

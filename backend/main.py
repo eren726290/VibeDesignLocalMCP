@@ -13,6 +13,9 @@ from fastapi.responses import JSONResponse
 # Document Store
 from document import DocumentStore, Page, Document
 
+# HTML parsing
+from parse_html import parse_html_elements
+
 # MCP Server configuration
 SERVER_NAME = "paper-clone"
 SERVER_VERSION = "0.1.0"
@@ -181,7 +184,7 @@ async def _get_screenshot(doc_id: str, args: dict) -> dict:
 async def _write_html(doc_id: str, args: dict) -> dict:
     html = args.get("html", "")
     page_id = args.get("pageId", "") or None
-    elements = _parse_html_elements(html)
+    elements = parse_html_elements(html)
     if not doc_id:
         doc_id = "default"
     created = []
@@ -412,93 +415,6 @@ def _kebab_to_camel(kebab: str) -> str:
     return parts[0] + "".join(p.capitalize() for p in parts[1:])
 
 
-def _parse_style(raw: str) -> dict:
-    """Parse CSS style string into camelCase dict"""
-    style = {}
-    for item in raw.split(";"):
-        if ":" in item:
-            k, v = item.split(":", 1)
-            k = k.strip()
-            v = v.strip()
-            # Convert kebab-case to camelCase
-            parts = k.split("-")
-            camel = parts[0] + "".join(p.capitalize() for p in parts[1:])
-            style[camel] = v
-    return style
-
-
-def _infer_type(tag: str, style: dict, text: str) -> str:
-    """Infer element type from tag and style"""
-    if text:
-        return "text"
-    if style.get("fontSize"):
-        return "text"
-    bg = style.get("backgroundColor") or style.get("background") or ""
-    if bg not in ("transparent", "none", ""):
-        return "rectangle"
-    w = float(style.get("width", "0").rstrip("px") or 0)
-    h = float(style.get("height", "0").rstrip("px") or 0)
-    if "frame" in tag.lower() or (w > 200 and h > 100):
-        return "frame"
-    return "rectangle"
-
-
-def _parse_html_elements(html: str) -> list[dict]:
-    """Parse HTML string and extract elements (including nested)"""
-    from bs4 import BeautifulSoup
-    import uuid
-
-    soup = BeautifulSoup(html, "html.parser")
-    elements = []
-
-    def walk(soup_element, parent_id=None):
-        # Use .contents instead of .children — contents is always a fresh list
-        # (children returns a list_iterator that can be consumed by get_text or other ops)
-        for tag in soup_element.contents:
-            if not hasattr(tag, 'name') or tag.name is None:
-                continue
-            tag_name = tag.name
-            if tag_name in ("script", "style", "meta", "link", "head", "body", "html", "svg", "path", "rect", "circle", "line", "polyline", "polygon"):
-                continue
-
-            attrs = dict(tag.attrs)
-            style = _parse_style(attrs.get("style", ""))
-
-            # Collect Tag children (non-DirectString) once
-            tag_children = [c for c in tag.contents if hasattr(c, 'name') and c.name is not None and c.name not in ("script", "style")]
-
-            # text = only if NO Tag children (leaf node)
-            # Avoid get_text() — it traverses all descendants and can corrupt the tree
-            text = ""
-            if not tag_children:
-                text = "".join(t for t in tag.contents if isinstance(t, str)) or ""
-                text = text.strip()
-
-            el_id = f"n-{str(uuid.uuid4())[:8]}"
-            if "id" in attrs and attrs["id"]:
-                el_id = attrs["id"]
-
-            el_type = _infer_type(tag_name, style, text)
-
-            el = {
-                "id": el_id,
-                "name": f"{tag_name.capitalize()} Element",
-                "tag": tag_name,
-                "type": el_type,
-                "style": style,
-                "text": text if text else None,
-                "children": [],
-            }
-            if parent_id:
-                el["parentId"] = parent_id
-
-            elements.append(el)
-
-            for child in tag_children:
-                walk(child, parent_id=el_id)
-
-    walk(soup)
-    return elements
 
 
 # =============================================================================
