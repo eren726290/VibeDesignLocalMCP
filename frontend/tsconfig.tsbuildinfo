@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/bridge/api.ts","./src/canvas/canvas.tsx","./src/canvas/element.tsx","./src/panels/layerpanel.tsx","./src/panels/propertypanel.tsx","./src/store/editorstore.ts","./src/toolbar/toolbar.tsx"],"version":"5.9.3"}
