@@ -1,56 +1,13 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { Element } from './Element';
+import { ArtboardFrame } from './ArtboardFrame';
 import type { Element as ElementType } from '../types';
-
-// ─── Nested DOM rendering ────────────────────────────────────────────────────────
-function ElementNode({
-  element,
-  elementsMap,
-}: {
-  element: ElementType;
-  elementsMap: Map<string, ElementType>;
-}) {
-  const children = (element.children || [])
-    .map((id) => elementsMap.get(id))
-    .filter(Boolean) as ElementType[];
-
-  const flowChildren = children.filter(
-    (c) => c.style.position === 'relative' && !c.style.left && !c.style.top
-  );
-  const absoluteChildren = children.filter(
-    (c) =>
-      c.style.position === 'absolute' ||
-      (c.style.position === 'relative' && (c.style.left || c.style.top))
-  );
-
-  return (
-    <Element key={element.id} element={element}>
-      {flowChildren.map((child) => (
-        <ElementNode
-          key={child.id}
-          element={child}
-          elementsMap={elementsMap}
-        />
-      ))}
-      {absoluteChildren.map((child) => (
-        <div key={child.id} style={{ position: 'absolute', left: 0, top: 0 }}>
-          <ElementNode
-            element={child}
-            elementsMap={elementsMap}
-          />
-        </div>
-      ))}
-    </Element>
-  );
-}
 
 // ─── Canvas ─────────────────────────────────────────────────────────────────────
 
 export function Canvas() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [preview, setPreview] = useState<{
     x: number;
     y: number;
@@ -80,17 +37,19 @@ export function Canvas() {
   const activeTool = useEditorStore((s) => s.activeTool);
   const setTransform = useEditorStore((s) => s.setTransform);
   const doc = useEditorStore((s) => s.document);
-  const currentPage = doc?.pages[doc.current_page];
 
-  const { elementsMap, roots } = useMemo(() => {
-    if (!currentPage) return { elementsMap: new Map(), roots: [] };
+  // Build elementsMap from ALL pages, roots per page
+  const { elementsMap } = useMemo(() => {
     const map = new Map<string, ElementType>();
-    currentPage.elements.forEach((el) => map.set(el.id, el));
-    return {
-      elementsMap: map,
-      roots: currentPage.elements.filter((el) => !el.parentId),
-    };
-  }, [currentPage]);
+    if (!doc) return { elementsMap: map };
+
+    for (const page of doc.pages) {
+      for (const el of page.elements) {
+        map.set(el.id, el);
+      }
+    }
+    return { elementsMap: map };
+  }, [doc]);
 
   // ── Canvas events — registered once at mount, no dependency array re-runs ──
   useEffect(() => {
@@ -110,7 +69,6 @@ export function Canvas() {
 
     const handleMouseDown = (e: MouseEvent) => {
       const { activeTool } = useEditorStore.getState();
-      const target = e.target as HTMLElement;
       // Middle button or pan tool → start pan
       if (e.button === 1 || (e.button === 0 && activeTool === 'pan')) {
         isPanningRef.current = true;
@@ -208,7 +166,8 @@ export function Canvas() {
         const didDrag = dragRef.current.didDrag;
         const nodeId = dragRef.current.nodeId;
         if (didDrag) {
-          const { scale, document: doc, updateElement } = useEditorStore.getState();
+          const { transform, document: doc, updateElement } = useEditorStore.getState();
+          const scale = transform.scale;
           const dx = (e.clientX - dragRef.current.startX) / scale;
           const dy = (e.clientY - dragRef.current.startY) / scale;
           const finalX = dragRef.current.elX + dx;
@@ -392,18 +351,26 @@ export function Canvas() {
       }}
       onClick={handleCanvasClick}
     >
-      {/* No document placeholder */}
-      {!currentPage && (
+      {/* No artboards yet */}
+      {(!doc || doc.pages.length === 0) && (
         <div style={{
           position: 'absolute',
           inset: 0,
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          color: '#666',
+          gap: 8,
+          color: '#555',
           fontSize: 14,
+          fontFamily: 'system-ui, sans-serif',
+          pointerEvents: 'none',
         }}>
-          No document
+          <div style={{ fontSize: 32 }}>🎨</div>
+          <div>No artboards yet</div>
+          <div style={{ fontSize: 12, color: '#444' }}>
+            Add one from the left panel
+          </div>
         </div>
       )}
 
@@ -419,10 +386,11 @@ export function Canvas() {
           bottom: 0,
         }}
       >
-        {roots.map((el) => (
-          <ElementNode
-            key={el.id}
-            element={el}
+        {/* All artboards */}
+        {doc && doc.pages.map((page) => (
+          <ArtboardFrame
+            key={page.id}
+            page={page}
             elementsMap={elementsMap}
           />
         ))}

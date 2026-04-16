@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Document, Element, Page, Tool, Selection, Transform } from '../types';
 import { bridge } from '../bridge/api';
+import { syncManager } from './syncManager';
 
 interface EditorState {
   document: Document | null;
@@ -11,6 +12,9 @@ interface EditorState {
   setSpaceDown: (v: boolean) => void;
   selection: Selection | null;
   setSelection: (sel: Selection | null) => void;
+  selectedArtboardId: string | null;
+  selectArtboard: (id: string | null) => void;
+  updateArtboard: (id: string, updates: Partial<Page>) => void;
   transform: Transform;
   setTransform: (t: Partial<Transform>) => void;
   expandedNodes: Set<string>;
@@ -26,6 +30,7 @@ interface EditorState {
   addChild: (parentId: string, childId: string) => void;
   removeChild: (parentId: string, childId: string) => void;
   addPage: (page: Page) => void;
+  deletePage: (pageId: string) => void;
   setCurrentPage: (index: number) => void;
   copyElement: (id: string) => void;
   pasteElement: (x: number, y: number) => void;
@@ -44,12 +49,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   history: [],
   historyIndex: -1,
   expandedNodes: new Set<string>(),
+  selectedArtboardId: null,
 
   setActiveTool: (tool) => set({ activeTool: tool }),
 
   setSpaceDown: (v) => set({ spaceDown: v }),
 
   setSelection: (sel) => set({ selection: sel }),
+
+  selectArtboard: (id) => set({ selectedArtboardId: id }),
+
+  updateArtboard: (id, updates) => {
+    const { document } = get();
+    if (!document) return;
+    const pages = document.pages.map(p => p.id === id ? { ...p, ...updates } : p);
+    syncManager.pauseSync();
+    set({ document: { ...document, pages } });
+    bridge.updatePage(document.id, id, updates as Record<string, unknown>)
+      .catch(() => {})
+      .finally(() => syncManager.resumeSync());
+  },
 
   setTransform: (t) => set((state) => ({
     transform: { ...state.transform, ...t }
@@ -89,8 +108,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           : page
       ),
     };
+    syncManager.pauseSync();
     set({ document: updated });
-    window.paperBridge?.createElement(document.id, element as unknown as Record<string, unknown>);
+    bridge.createElement(document.id, element as unknown as Record<string, unknown>)
+      .catch(() => {})
+      .finally(() => syncManager.resumeSync());
     get().pushHistory();
   },
 
@@ -105,10 +127,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           : page
       ),
     };
+    syncManager.pauseSync();
     set({ document: updated });
-    window.paperBridge?.updateElement(document.id, id, updates as Record<string, unknown>);
-    // Note: pushHistory is intentionally NOT called here — drag/resize are too frequent.
-    // Call pushHistory manually after drag/resize ends if needed.
+    bridge.updateElement(document.id, id, updates as Record<string, unknown>)
+      .catch(() => {})
+      .finally(() => syncManager.resumeSync());
   },
 
   deleteElement: (id) => {
@@ -122,8 +145,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           : page
       ),
     };
+    syncManager.pauseSync();
     set({ document: updated });
-    window.paperBridge?.deleteElement(document.id, id);
+    bridge.deleteElement(document.id, id)
+      .catch(() => {})
+      .finally(() => syncManager.resumeSync());
     get().pushHistory();
   },
 
@@ -151,8 +177,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           : page
       ),
     };
+    syncManager.pauseSync();
     set({ document: updated });
-    window.paperBridge?.duplicateElement(document.id, id);
+    bridge.duplicateElement(document.id, id)
+      .catch(() => {})
+      .finally(() => syncManager.resumeSync());
     get().pushHistory();
   },
 
@@ -220,8 +249,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...document,
       pages: [...document.pages, page],
     };
+    syncManager.pauseSync();
     set({ document: updated });
-    bridge.createPage(document.id, page as unknown as Record<string, unknown>).catch(() => {});
+    bridge.createPage(document.id, page as unknown as Record<string, unknown>)
+      .catch(() => {})
+      .finally(() => syncManager.resumeSync());
+  },
+
+  deletePage: (pageId: string) => {
+    const { document } = get();
+    if (!document) return;
+    if (document.pages.length <= 1) return; // keep at least one
+    const idx = document.pages.findIndex(p => p.id === pageId);
+    if (idx === -1) return;
+    const pages = document.pages.filter(p => p.id !== pageId);
+    let current_page = document.current_page;
+    if (idx <= current_page) current_page = Math.max(0, current_page - 1);
+    syncManager.pauseSync();
+    set({ document: { ...document, pages, current_page }, selection: null, selectedArtboardId: null });
+    bridge.deletePage(document.id, pageId)
+      .catch(() => {})
+      .finally(() => syncManager.resumeSync());
   },
 
   setCurrentPage: (index) => {
@@ -253,12 +301,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
     const { addElement } = get();
     addElement(newElement);
-    setSelection({
-      nodeId: newElement.id,
-      x,
-      y,
-      width: parseFloat(newElement.style.width || '100'),
-      height: parseFloat(newElement.style.height || '100'),
+    set({
+      selection: {
+        nodeId: newElement.id,
+        x,
+        y,
+        width: parseFloat(newElement.style.width || '100'),
+        height: parseFloat(newElement.style.height || '100'),
+      },
     });
   },
 

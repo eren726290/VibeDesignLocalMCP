@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
+import { bridge } from '../bridge/api';
 import type { Element, Page } from '../types';
 
 // ─── Icons ─────────────────────────────────────────────────────────────────────
@@ -255,14 +256,26 @@ function LayerTreeItem({
 
 // ─── Page item ────────────────────────────────────────────────────────────────
 
+function TrashIcon() {
+  return (
+    <svg width={12} height={12} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={1.5}>
+      <path d="M1.5 3H10.5M4 3V1.5H8V3M4.5 5.5V9.5M7.5 5.5V9.5M2 3L2.5 10.5H9.5L10 3H2Z" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
 function PageItem({
   page,
   isCurrent,
   onSelect,
+  onDelete,
+  canDelete,
 }: {
   page: Page;
   isCurrent: boolean;
   onSelect: () => void;
+  onDelete: () => void;
+  canDelete: boolean;
 }) {
   return (
     <div
@@ -324,7 +337,60 @@ function PageItem({
       {isCurrent && (
         <CheckIcon />
       )}
+      {/* Delete button */}
+      {canDelete && (
+        <div
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          style={{
+            width: 24,
+            height: 24,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#555',
+            cursor: 'pointer',
+            borderRadius: 4,
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.color = '#c44'}
+          onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.color = '#555'}
+        >
+          <TrashIcon />
+        </div>
+      )}
     </div>
+  );
+}
+
+// ─── Artboard button ────────────────────────────────────────────────────────────
+
+function ArtboardBtn({ label, sub, onClick }: { label: string; sub: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '8px 10px',
+        background: '#2a2a2a',
+        border: '1px solid #333',
+        borderRadius: 6,
+        color: '#aaa',
+        cursor: 'pointer',
+        textAlign: 'left',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        fontSize: 12,
+        fontFamily: 'system-ui, sans-serif',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.background = '#333')}
+      onMouseLeave={e => (e.currentTarget.style.background = '#2a2a2a')}
+    >
+      <div>
+        <div style={{ color: '#fff', fontWeight: 500 }}>{label}</div>
+        <div style={{ color: '#666', fontSize: 10 }}>{sub}</div>
+      </div>
+      <span style={{ color: '#555', fontSize: 14 }}>+</span>
+    </button>
   );
 }
 
@@ -339,14 +405,53 @@ export function LayerPanel() {
     toggleExpanded,
     setCurrentPage,
     addPage,
+    deletePage,
     setActiveTool,
+    selectedArtboardId,
+    selectArtboard,
   } = useEditorStore();
-
   const [pagesExpanded, setPagesExpanded] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const docId = bridge.getCurrentDocId();
+
+  const handleCopyId = () => {
+    navigator.clipboard.writeText(docId).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   if (!document) return null;
+  if (document.pages.length === 0) {
+    return (
+      <div style={{
+        width: 240,
+        background: '#1a1a1a',
+        borderRight: '1px solid #333',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        padding: 16,
+      }}>
+        <div style={{ fontSize: 20 }}>🎨</div>
+        <div style={{ color: '#666', fontSize: 12 }}>No artboards</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', marginTop: 8 }}>
+          <ArtboardBtn label="Desktop Web" sub="1440×900" onClick={() => addPage({ id: `page-${Date.now()}`, name: 'Desktop', x: 0, y: 0, width: 1440, height: 900, elements: [] })} />
+          <ArtboardBtn label="Tablet" sub="768×1024" onClick={() => addPage({ id: `page-${Date.now()}`, name: 'Tablet', x: 0, y: 0, width: 768, height: 1024, elements: [] })} />
+          <ArtboardBtn label="Mobile" sub="375×812" onClick={() => addPage({ id: `page-${Date.now()}`, name: 'Mobile', x: 0, y: 0, width: 375, height: 812, elements: [] })} />
+          <ArtboardBtn label="Custom" sub="choose size" onClick={() => {
+            const w = prompt('Width (px):', '1440');
+            const h = prompt('Height (px):', '900');
+            if (w && h) addPage({ id: `page-${Date.now()}`, name: 'Custom', x: 0, y: 0, width: parseInt(w), height: parseInt(h), elements: [] });
+          }} />
+        </div>
+      </div>
+    );
+  }
 
   const currentPage = document.pages[document.current_page];
+  if (!currentPage) return null;
   const tree = buildTree(currentPage.elements);
 
   const handleSelectElement = (element: Element) => {
@@ -361,11 +466,17 @@ export function LayerPanel() {
   };
 
   const handleAddPage = () => {
+    const w = prompt('Width (px):', '1440');
+    const h = prompt('Height (px):', '900');
+    const name = prompt('Name:', `Page ${document.pages.length + 1}`);
+    if (!w || !h) return;
     const newPage: Page = {
       id: `page-${Date.now()}`,
-      name: `Page ${document.pages.length + 1}`,
-      width: 375,
-      height: 812,
+      name: name || `Page ${document.pages.length + 1}`,
+      x: 0,
+      y: document.pages.reduce((sum, p) => sum + p.height + 20, 0),
+      width: parseInt(w),
+      height: parseInt(h),
       elements: [],
     };
     addPage(newPage);
@@ -413,6 +524,23 @@ export function LayerPanel() {
           }}
         >
           {document.title || 'Untitled'}
+          <button
+            title="Copy doc ID for AI"
+            onClick={handleCopyId}
+            style={{
+              marginLeft: 8,
+              padding: '1px 5px',
+              fontSize: 9,
+              background: copied ? '#2a6' : '#333',
+              color: copied ? '#fff' : '#888',
+              border: 'none',
+              borderRadius: 3,
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            {copied ? 'Copied!' : docId}
+          </button>
         </div>
       </div>
 
@@ -447,7 +575,7 @@ export function LayerPanel() {
               <ChevronIcon />
             </div>
             <span style={{ flex: 1, fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Pages
+              Artboards
             </span>
             {/* Add page button */}
             <div
@@ -474,8 +602,10 @@ export function LayerPanel() {
             <PageItem
               key={page.id}
               page={page}
-              isCurrent={document.current_page === index}
-              onSelect={() => setCurrentPage(index)}
+              isCurrent={!!selectedArtboardId && selectedArtboardId === page.id || !selectedArtboardId && document.current_page === index}
+              onSelect={() => { selectArtboard(page.id); setCurrentPage(index); }}
+              onDelete={() => deletePage(page.id)}
+              canDelete={document.pages.length > 1}
             />
           ))}
         </div>
@@ -487,7 +617,7 @@ export function LayerPanel() {
         <div style={{ paddingTop: 8, paddingBottom: 16 }}>
           <div style={{ paddingLeft: 12, paddingRight: 12, height: 32, display: 'flex', alignItems: 'center' }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Layers
+              Elements
             </span>
           </div>
 
@@ -513,7 +643,7 @@ export function LayerPanel() {
         </div>
       </div>
 
-      {/* ── Bottom brand ── */}
+      {/* ── Bottom brand + new doc ── */}
       <div
         style={{
           padding: '8px 12px',
@@ -527,6 +657,27 @@ export function LayerPanel() {
       >
         <span style={{ fontWeight: 600 }}>Paper</span>
         <span>Clone</span>
+        <button
+          onClick={() => {
+            const id = `doc-${Date.now().toString(36)}`;
+            bridge.switchDocument(id);
+            bridge.newDocument().then((doc: any) => {
+              useEditorStore.getState().setDocument(doc);
+            }).catch(() => {});
+          }}
+          style={{
+            marginLeft: 'auto',
+            padding: '2px 6px',
+            fontSize: 10,
+            background: '#333',
+            color: '#888',
+            border: 'none',
+            borderRadius: 3,
+            cursor: 'pointer',
+          }}
+        >
+          + New Doc
+        </button>
       </div>
     </div>
   );

@@ -58,26 +58,26 @@
 - [ ] 文件打开/保存对话框（pywebview native dialog）
 - [ ] 工具栏 SVG 图标
 
-### 第二阶段（编辑器交互） 🔄 进行中
+### 第二阶段（编辑器交互） ✅ 基本完成
 
 - [x] 元素选中
 - [x] 拖拽移动
-- [ ] 调整大小（resize handle）
-- [x] 画布缩放（鼠标滚轮）
+- [x] 调整大小（resize handle — ArtboardFrame 8点缩放 + Element 4点缩放）
+- [x] 画布缩放（鼠标滚轮 ⌘+ / ⌘-）
 - [x] 画布平移（Pan 工具 + 空格拖拽）
 - [x] 撤销/重做（Zustand history）
 - [x] 右侧属性面板（颜色、字体、尺寸等）
 - [x] 左侧图层面板（节点层级管理）
 - [ ] 双击文本编辑
-- [ ] 键盘快捷键完善
+- [ ] 键盘快捷键完善（右键菜单 Copy/Paste/Duplicate 等）
 
-### 第三阶段（完整功能）
+### 第三阶段（完整功能）🔄 进行中
 
-- [ ] 多页面/多 Artboard 支持
+- [x] 多页面/多 Artboard 支持（canvas 同时展示所有 artboard，可拖拽/缩放，属性实时同步后端）
 - [ ] 复制/粘贴
 - [ ] 对齐辅助线
 - [ ] 导出美化 HTML
-- [ ] 工具栏 SVG 图标
+- [ ] 工具栏 SVG 图标（复用 Paper 原图标）
 
 ### 第四阶段（打包与发布）
 
@@ -171,6 +171,7 @@ paper_clone/
 - pywebview 打包（需要 native dialog 支持）
 - 文件打开/保存功能
 - SVG 工具栏图标
+- MCP update_artboard 工具（x/y/width/height/name/backgroundColor）
 
 ---
 

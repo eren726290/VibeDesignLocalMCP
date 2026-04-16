@@ -16,8 +16,11 @@ export interface Element {
 export interface Page {
   id: string;
   name: string;
+  x: number;
+  y: number;
   width: number;
   height: number;
+  backgroundColor?: string;
   elements: Element[];
 }
 

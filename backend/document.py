@@ -6,6 +6,9 @@ import uuid
 import base64
 from pathlib import Path
 from typing import Optional
+import os
+
+DATA_DIR = Path.home() / ".paper_clone" / "data"
 from pydantic import BaseModel
 
 
@@ -22,8 +25,11 @@ class Element(BaseModel):
 class Page(BaseModel):
     id: str
     name: str
+    x: int = 0
+    y: int = 0
     width: int = 375
     height: int = 812
+    backgroundColor: Optional[str] = "#ffffff"
     elements: list[dict] = []
 
 
@@ -39,6 +45,36 @@ class DocumentStore:
     def __init__(self):
         self.documents: dict[str, Document] = {}
         self._screenshot_data: dict[str, str] = {}
+        # Ensure data directory exists
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        # Load any existing documents from disk
+        self._load_all()
+
+    def _doc_file(self, doc_id: str) -> Path:
+        return DATA_DIR / f"{doc_id}.json"
+
+    def _load_all(self):
+        """Load all documents from disk on startup"""
+        for f in DATA_DIR.glob("*.json"):
+            try:
+                with open(f, encoding="utf-8") as fp:
+                    data = json.load(fp)
+                doc = Document.model_validate(data)
+                self.documents[doc.id] = doc
+            except Exception:
+                pass  # Skip corrupted files
+
+    def _save(self, doc_id: str):
+        """Persist document to disk after every mutation"""
+        doc = self.documents.get(doc_id)
+        if not doc:
+            return
+        try:
+            self._doc_file(doc_id).write_text(
+                doc.model_dump_json(indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass  # Non-fatal: continue even if disk write fails
 
     def new_document(self, doc_id: str = None) -> dict:
         """Create a new blank document"""
@@ -48,21 +84,21 @@ class DocumentStore:
         existing = self.documents.get(doc_id)
         if existing:
             return self._doc_to_response(existing)
-        page = Page(id="page-1", name="Page 1")
+        # Start with no pages — AI must create artboards
         doc = Document(
             id=doc_id,
             title="Untitled",
-            pages=[page],
+            pages=[],
             current_page=0,
         )
         self.documents[doc_id] = doc
+        self._save(doc_id)
         return self._doc_to_response(doc)
 
     def get_document(self, doc_id: str) -> dict:
-        """Get document by ID"""
+        """Get document by ID — source of truth is in-memory."""
         doc = self.documents.get(doc_id)
         if not doc:
-            # Auto-create if not found
             return self.new_document()
         return self._doc_to_response(doc)
 
@@ -96,21 +132,27 @@ class DocumentStore:
 
         doc.id = doc_id
         self.documents[doc_id] = doc
+        self._save(doc_id)
         return self._doc_to_response(doc)
 
-    def create_element(self, doc_id: str, element: dict) -> dict:
-        """Create a new element"""
+    def create_element(self, doc_id: str, element: dict, page_id: Optional[str] = None) -> dict:
+        """Create a new element on the current page or a specific page."""
         doc = self.documents.get(doc_id)
         if not doc:
             return {"error": "Document not found"}
 
-        page = doc.pages[doc.current_page]
+        if page_id:
+            target_page = next((p for p in doc.pages if p.id == page_id), None)
+            if not target_page:
+                return {"error": f"Page '{page_id}' not found"}
+        else:
+            target_page = doc.pages[doc.current_page]
 
-        # Generate ID if not provided
         if "id" not in element:
             element["id"] = f"n-{str(uuid.uuid4())[:8]}"
 
-        page.elements.append(element)
+        target_page.elements.append(element)
+        self._save(doc_id)
         return {"success": True, "element": element}
 
     def create_page(self, doc_id: str, page: dict) -> dict:
@@ -123,6 +165,10 @@ class DocumentStore:
             page["id"] = f"page-{str(uuid.uuid4())[:8]}"
         if "name" not in page:
             page["name"] = f"Page {len(doc.pages) + 1}"
+        if "x" not in page:
+            page["x"] = 0
+        if "y" not in page:
+            page["y"] = sum(p.height for p in doc.pages) + len(doc.pages) * 20
         if "width" not in page:
             page["width"] = 375
         if "height" not in page:
@@ -133,12 +179,58 @@ class DocumentStore:
         new_page = Page(
             id=page["id"],
             name=page["name"],
+            x=page.get("x", 0),
+            y=page.get("y", 0),
             width=page.get("width", 375),
             height=page.get("height", 812),
             elements=[],
         )
         doc.pages.append(new_page)
+        self._save(doc_id)
         return {"success": True, "page": new_page.model_dump()}
+
+    def update_page(self, doc_id: str, page_id: str, updates: dict) -> dict:
+        """Update artboard/page properties (x, y, width, height, name, backgroundColor)"""
+        doc = self.documents.get(doc_id)
+        if not doc:
+            return {"error": "Document not found"}
+        for i, p in enumerate(doc.pages):
+            if p.id == page_id:
+                p_dict = p.model_dump()
+                for key in ("x", "y", "width", "height", "name", "backgroundColor"):
+                    if key in updates:
+                        p_dict[key] = updates[key]
+                doc.pages[i] = Page.model_validate(p_dict)
+                self._save(doc_id)
+                return {"success": True}
+        return {"error": f"Page '{page_id}' not found"}
+
+    def delete_page(self, doc_id: str, page_id: str) -> dict:
+        """Delete a page/artboard"""
+        doc = self.documents.get(doc_id)
+        if not doc:
+            return {"error": "Document not found"}
+
+        idx = None
+        for i, p in enumerate(doc.pages):
+            if p.id == page_id:
+                idx = i
+                break
+        if idx is None:
+            return {"error": f"Page '{page_id}' not found"}
+
+        if len(doc.pages) == 1:
+            return {"error": "Cannot delete the last page"}
+
+        doc.pages.pop(idx)
+        # Adjust current_page if needed
+        if doc.current_page >= len(doc.pages):
+            doc.current_page = len(doc.pages) - 1
+        elif doc.current_page > idx:
+            doc.current_page -= 1
+
+        self._save(doc_id)
+        return {"success": True}
 
     def update_element(self, doc_id: str, element_id: str, updates: dict) -> dict:
         """Update an element"""
@@ -146,24 +238,27 @@ class DocumentStore:
         if not doc:
             return {"error": "Document not found"}
 
-        page = doc.pages[doc.current_page]
-
-        for i, el in enumerate(page.elements):
-            if el.get("id") == element_id:
-                page.elements[i] = {**el, **updates}
-                return {"success": True, "element": page.elements[i]}
+        for page in doc.pages:
+            for i, el in enumerate(page.elements):
+                if el.get("id") == element_id:
+                    page.elements[i] = {**el, **updates}
+                    self._save(doc_id)
+                    return {"success": True, "element": page.elements[i]}
 
         return {"error": "Element not found"}
 
     def delete_element(self, doc_id: str, element_id: str) -> dict:
-        """Delete an element"""
+        """Delete an element from any page"""
         doc = self.documents.get(doc_id)
         if not doc:
             return {"error": "Document not found"}
-
-        page = doc.pages[doc.current_page]
-        page.elements = [el for el in page.elements if el.get("id") != element_id]
-        return {"success": True}
+        for page in doc.pages:
+            found = any(el.get("id") == element_id for el in page.elements)
+            if found:
+                page.elements = [el for el in page.elements if el.get("id") != element_id]
+                self._save(doc_id)
+                return {"success": True}
+        return {"error": "Element not found"}
 
     def duplicate_element(self, doc_id: str, element_id: str) -> dict:
         """Duplicate an element"""
@@ -171,21 +266,20 @@ class DocumentStore:
         if not doc:
             return {"error": "Document not found"}
 
-        page = doc.pages[doc.current_page]
-
-        for el in page.elements:
-            if el.get("id") == element_id:
-                new_el = {**el, "id": f"n-{str(uuid.uuid4())[:8]}"}
-                # Offset position slightly
-                if "style" in new_el:
-                    style = dict(new_el["style"])
-                    if "left" in style:
-                        style["left"] = f"{float(style['left'].replace('px','')) + 20}px"
-                    if "top" in style:
-                        style["top"] = f"{float(style['top'].replace('px','')) + 20}px"
-                    new_el["style"] = style
-                page.elements.append(new_el)
-                return {"success": True, "element": new_el}
+        for page in doc.pages:
+            for el in page.elements:
+                if el.get("id") == element_id:
+                    new_el = {**el, "id": f"n-{str(uuid.uuid4())[:8]}"}
+                    if "style" in new_el:
+                        style = dict(new_el["style"])
+                        if "left" in style:
+                            style["left"] = f"{float(style['left'].replace('px','')) + 20}px"
+                        if "top" in style:
+                            style["top"] = f"{float(style['top'].replace('px','')) + 20}px"
+                        new_el["style"] = style
+                    page.elements.append(new_el)
+                    self._save(doc_id)
+                    return {"success": True, "element": new_el}
 
         return {"error": "Element not found"}
 
@@ -216,8 +310,11 @@ class DocumentStore:
                 {
                     "id": p.id,
                     "name": p.name,
+                    "x": p.x,
+                    "y": p.y,
                     "width": p.width,
                     "height": p.height,
+                    "backgroundColor": p.backgroundColor,
                     "elements": p.elements,
                 }
                 for p in doc.pages
@@ -257,7 +354,7 @@ class DocumentStore:
             elements_html = "".join(render_element(el, indent) for el in roots)
 
             pages_html += f'{indent}<div data-paper-page="{i}" data-paper-name="{page.name}"{nl}'
-            pages_html += f'{indent}     style="width: {page.width}px; height: {page.height}px; position: absolute; left: {100 + i * (page.width + 100)}px; top: 100px; background: white;">{nl}'
+            pages_html += f'{indent}     style="width: {page.width}px; height: {page.height}px; position: absolute; left: {page.x}px; top: {page.y}px; background: {page.backgroundColor or "#ffffff"};">{nl}'
             pages_html += elements_html
             pages_html += f'{indent}</div>{nl}'
 

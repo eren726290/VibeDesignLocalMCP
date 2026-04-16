@@ -5,7 +5,10 @@ import { Toolbar } from './toolbar/Toolbar';
 import { LayerPanel } from './panels/LayerPanel';
 import { PropertyPanel } from './panels/PropertyPanel';
 import { bridge } from './bridge/api';
+import { syncManager } from './store/syncManager';
 import type { Document } from './types';
+
+// ─── Global Sync Manager (server-first, pausable polling) ────────────────────
 
 interface ContextMenuState {
   visible: boolean;
@@ -21,24 +24,54 @@ export function App() {
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
-  // Initialize document
+  // Initialize document — query existing doc first, don't auto-create
   useEffect(() => {
     const init = async () => {
       try {
-        const doc = await bridge.newDocument();
+        const doc = await bridge.getDocument(docIdRef.current);
         setDocument(doc as Document);
         if ((doc as Document).id) docIdRef.current = (doc as Document).id;
       } catch (e) {
+        // Backend unreachable — show empty state, user can click + to create
         setDocument({
-          id: 'default',
+          id: docIdRef.current,
           title: 'Untitled',
-          pages: [{ id: 'page-1', name: 'Page 1', width: 375, height: 812, elements: [] }],
+          pages: [],
           current_page: 0,
         });
       }
     };
     init();
   }, [setDocument]);
+
+  // ─── Sync with backend (polls for AI/MCP changes) ─────────────────────────────
+  useEffect(() => {
+    let lastSync = 0;
+    const sync = async () => {
+      // Throttle
+      const now = Date.now();
+      if (now - lastSync < 800) return;
+      lastSync = now;
+
+      // Skip if a local PUT is in-flight (pause polling to avoid overwriting)
+      if (syncManager.pauseRef.count > 0) return;
+
+      try {
+        const doc = await bridge.getDocument(docIdRef.current);
+        if (!doc) return;
+        // Server is source of truth — always overwrite local state
+        useEditorStore.getState().setDocument(doc as Document);
+      } catch (e) {
+        // silently ignore sync errors
+      }
+    };
+    syncIntervalRef.current = window.setInterval(sync, 1000);
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+      }
+    };
+  }, []);
 
   // ─── Keyboard shortcuts (document-level) ─────────────────────────────────────
   useEffect(() => {
