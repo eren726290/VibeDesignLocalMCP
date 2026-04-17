@@ -1,0 +1,23 @@
+/* ─── Dark-themed scrollbar (applied via className="paper-scroll") ─── */
+
+/* Webkit (Chrome, Safari, Edge) */
+.paper-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.paper-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.paper-scroll::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+.paper-scroll::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}
+
+/* Firefox */
+.paper-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #333 transparent;
+}

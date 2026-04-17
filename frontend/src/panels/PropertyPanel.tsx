@@ -288,7 +288,7 @@ export function PropertyPanel() {
   if (!currentPage) return null;
 
   return (
-    <div style={{
+    <div className="paper-scroll" style={{
       width: 280, background: '#1a1a1a', borderLeft: '1px solid #333', overflow: 'auto',
     }}>
       {selectedArtboardId ? (

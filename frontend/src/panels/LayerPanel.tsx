@@ -545,7 +545,7 @@ export function LayerPanel() {
       </div>
 
       {/* ── Scrollable area ── */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div className="paper-scroll" style={{ flex: 1, overflow: 'auto' }}>
 
         {/* Pages section */}
         <div style={{ padding: '8px 0' }}>

@@ -2,7 +2,7 @@
 HTML parsing utilities for Paper Clone.
 Extracts element trees from HTML strings using BeautifulSoup.
 """
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 import uuid
 
 
@@ -20,6 +20,16 @@ def _parse_style(style_str: str) -> dict:
             # Convert kebab-case to camelCase for React style props
             parts = k.split("-")
             camel = parts[0] + "".join(p.capitalize() for p in parts[1:])
+            # Ensure numeric lengths have px units (React CSSProperties needs them).
+            # Only for length/percentage properties that AI sometimes writes without px.
+            # Unitless properties (zIndex, opacity, flexGrow, flexShrink, flex, etc.) must stay unitless.
+            if camel in ("width", "height", "top", "left", "right", "bottom",
+                         "marginTop", "marginRight", "marginBottom", "marginLeft",
+                         "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+                         "borderRadius", "borderWidth", "fontSize", "lineHeight",
+                         "flexBasis", "gap") \
+               and v and v.lstrip("-").isdigit():
+                v = f"{v}px"
             style[camel] = v
     return style
 
@@ -121,8 +131,9 @@ def parse_html_elements(html: str) -> list[dict]:
             # Ensure it doesn't overflow the artboard
             style["overflow"] = style.get("overflow", "hidden")
 
-        # Text: only from direct string children (not all descendants via get_text())
-        direct_strings = [s for s in tag.contents if isinstance(s, str)]
+        # Text: only from direct string children (not all descendants via get_text()).
+        # Filter out Comment objects — they're subclasses of str in bs4.
+        direct_strings = [s for s in tag.contents if isinstance(s, str) and not isinstance(s, Comment)]
         text = "".join(direct_strings).strip() or None
 
         el_id = f"n-{str(uuid.uuid4())[:8]}"

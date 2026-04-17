@@ -318,11 +318,20 @@ async def _create_artboard(doc_id: str, args: dict) -> dict:
     height = args.get("height", 812)
     x = args.get("x", 0)
     y = args.get("y", 0)
+    page_id = args.get("pageId")  # optionally specified by caller
     if not doc_id:
         doc_id = "default"
     doc = doc_store.documents.get(doc_id)
     if doc:
-        page = Page(id=f"page-{len(doc.pages) + 1}", name=name, width=width, height=height, x=x, y=y)
+        # Generate unique ID — either caller-specified or a fresh uuid
+        if not page_id:
+            import uuid
+            page_id = f"page-{str(uuid.uuid4())[:8]}"
+        # Avoid collision (shouldn't happen with uuid, but safety-check)
+        while any(p.id == page_id for p in doc.pages):
+            import uuid
+            page_id = f"page-{str(uuid.uuid4())[:8]}"
+        page = Page(id=page_id, name=name, width=width, height=height, x=x, y=y)
         doc.pages.append(page)
         doc.current_page = len(doc.pages) - 1  # auto-switch to new page
         doc_store._save(doc_id)
@@ -430,7 +439,7 @@ TOOLS_LIST = [
     {"name": "get_children", "description": "Get children of a node", "inputSchema": {"type": "object", "properties": {"nodeId": {"type": "string"}}}},
     {"name": "get_node_info", "description": "Get node info", "inputSchema": {"type": "object", "properties": {"nodeId": {"type": "string"}}}},
     {"name": "get_screenshot", "description": "Capture screenshot", "inputSchema": {"type": "object", "properties": {"nodeId": {"type": "string"}}}},
-    {"name": "write_html", "description": "Write HTML to create elements on a specific page", "inputSchema": {"type": "object", "properties": {"html": {"type": "string", "description": "HTML string with inline styles. Each root element becomes a separate canvas element. Use position:absolute and specify left/top/width/height."}, "pageId": {"type": "string", "description": "Target page ID. If omitted, creates on the current page. Use create_artboard first to get a pageId."}}, "required": ["html"]}},
+    {"name": "write_html", "description": "Write HTML to create elements on a specific page", "inputSchema": {"type": "object", "properties": {"html": {"type": "string", "description": "HTML string with inline styles. The outermost element fills the artboard automatically; no need to set position/width/height."}, "pageId": {"type": "string", "description": "Target page ID. If omitted, creates on the current page. Use create_artboard first to get a pageId."}}, "required": ["html"]}},
     {"name": "duplicate_nodes", "description": "Duplicate nodes", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}}, "required": ["nodeIds"]}},
     {"name": "update_styles", "description": "Update styles", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}, "styles": {"type": "object"}}, "required": ["nodeIds", "styles"]}},
     {"name": "set_text_content", "description": "Set text content", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}, "text": {"type": "string"}}, "required": ["nodeIds", "text"]}},
@@ -442,7 +451,7 @@ TOOLS_LIST = [
     {"name": "save_document", "description": "Save document", "inputSchema": {"type": "object", "properties": {"filePath": {"type": "string"}}}},
     {"name": "open_document", "description": "Open document", "inputSchema": {"type": "object", "properties": {"filePath": {"type": "string"}}, "required": ["filePath"]}},
     {"name": "export_html", "description": "Export as HTML", "inputSchema": {"type": "object", "properties": {"pretty": {"type": "boolean"}}}},
-    {"name": "create_artboard", "description": "Create a new artboard/page", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Artboard name (e.g. 'Header', 'Hero Section', 'Mobile Home')"}, "width": {"type": "number", "description": "Width in pixels (e.g. 1440 for desktop, 375 for mobile)"}, "height": {"type": "number", "description": "Height in pixels (e.g. 900 for desktop hero, 812 for mobile)"}, "x": {"type": "number", "description": "X position on canvas (px)"}, "y": {"type": "number", "description": "Y position on canvas (px)"}}}},
+    {"name": "create_artboard", "description": "Create a new artboard/page", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Optional. Specify a page ID (e.g. 'hero-section'). If omitted, a unique ID is auto-generated."}, "name": {"type": "string", "description": "Artboard name (e.g. 'Header', 'Hero Section', 'Mobile Home')"}, "width": {"type": "number", "description": "Width in pixels (e.g. 1440 for desktop, 375 for mobile)"}, "height": {"type": "number", "description": "Height in pixels (e.g. 900 for desktop hero, 812 for mobile)"}, "x": {"type": "number", "description": "X position on canvas (px)"}, "y": {"type": "number", "description": "Y position on canvas (px)"}}}},
     {"name": "delete_artboard", "description": "Delete an artboard/page", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Page ID to delete"}}, "required": ["pageId"]}},
     {"name": "delete_nodes", "description": "Delete elements by their IDs", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}, "description": "Array of element IDs to delete"}}, "required": ["nodeIds"]}},
     {"name": "update_artboard", "description": "Update artboard/page properties (position, size, name, background color)", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Page ID to update"}, "x": {"type": "number", "description": "X position on canvas (px)"}, "y": {"type": "number", "description": "Y position on canvas (px)"}, "width": {"type": "number", "description": "Width in pixels"}, "height": {"type": "number", "description": "Height in pixels"}, "name": {"type": "string", "description": "Artboard name"}, "backgroundColor": {"type": "string", "description": "Background color (hex, e.g. #ffffff)"}}, "required": ["pageId"]}},
@@ -501,11 +510,11 @@ Example artboard sizes:
   - Hero: width=1440, height=600
 
 Tool order:
-  create_artboard({name:"Hero Section", width:1440, height:600}) → returns pageId
-  write_html({pageId: pageId, html: "..."})
-  create_artboard({name:"Features", width:1440, height:400})
-  write_html({pageId: newPageId, html: "..."})
-  delete_artboard({pageId: "page-1"}) → removes unwanted artboards
+  create_artboard({pageId: "hero", name:"Hero Section", width:1440, height:600}) → returns pageId
+  write_html({pageId: "hero", html: "..."})
+  create_artboard({pageId: "features", name:"Features", width:1440, height:400})
+  write_html({pageId: "features", html: "..."})
+  delete_artboard({pageId: "hero"}) → removes artboard
 
 Each artboard is independent. Design web pages by creating one artboard per section.""",
             }
