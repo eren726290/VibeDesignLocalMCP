@@ -32,16 +32,20 @@ export const Element = React.memo(function Element({ element, children, isRoot }
 
   const styleLeft = element.style.left;
   const styleTop = element.style.top;
-  // Non-zero position: left/top are explicitly set to non-zero values
-  const hasNonZeroPos = (styleLeft !== undefined && styleLeft !== '0px' && styleLeft !== '0') ||
-                         (styleTop !== undefined && styleTop !== '0px' && styleTop !== '0');
   const origPos = element.style.position;
-  // Root elements always need position:absolute (coordinate system relative to artboard).
-  // Elements with text need to be block elements (to show the text with its style).
-  // Non-root flex/grid children use their parent's layout context.
-  // position:relative is also considered "positioned" so it participates in normal flow.
+
+  // Only force position:absolute when AI explicitly wrote it (left/top or position:absolute).
+  // Everything else flows naturally — just like writing an HTML file.
+  const hasExplicitAbsolute =
+    origPos === 'absolute' ||
+    origPos === 'fixed' ||
+    (origPos !== 'relative' &&
+     ((styleLeft !== undefined && styleLeft !== '0px' && styleLeft !== '0') ||
+      (styleTop !== undefined && styleTop !== '0px' && styleTop !== '0')));
+
   const hasText = element.text !== undefined && element.text !== null && element.text !== '';
-  const isPositioned = isFrame || isRoot || origPos === 'absolute' || origPos === 'fixed' || origPos === 'relative' || hasNonZeroPos || hasText;
+  // Needs a stacking context if: frame, AI explicitly absolute, or has text (block element)
+  const isPositioned = isFrame || origPos === 'absolute' || origPos === 'fixed' || hasExplicitAbsolute || hasText;
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -139,11 +143,11 @@ export const Element = React.memo(function Element({ element, children, isRoot }
   const style: React.CSSProperties = {
     ...element.style,
     ...(isRoot
-      ? { position: 'absolute' as const, top: 0, left: 0, width: '100%', height: '100%' }  // fills artboard
+      ? { position: 'relative' as const, width: '100%' }             // fills artboard width, natural height
+      : hasExplicitAbsolute
+      ? { position: 'absolute' as const }                            // AI explicitly positioned
       : isFrame
       ? { position: 'relative' as const }
-      : hasNonZeroPos
-      ? { position: 'absolute' as const }
       : {}),
     cursor: 'move',
     userSelect: 'none',

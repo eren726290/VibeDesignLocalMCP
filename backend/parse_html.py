@@ -110,9 +110,10 @@ def parse_html_elements(html: str) -> list[dict]:
         attrs = dict(tag.attrs)
         style = _parse_style(attrs.get("style", ""))
 
-        # The outermost element should fill the artboard — strip layout props
-        # that would override natural flow (position, left/top/width/height).
-        # Artboard dimensions provide the "window" viewport.
+        # The outermost element fills the artboard naturally.
+        # Strip any layout props that would override natural flow — the artboard
+        # provides the viewport dimensions (375×812 etc.). The frontend sets
+        # width:100% for the root, so width/height from AI are redundant.
         if is_first:
             is_first = False
             for key in ["position", "left", "top", "right", "bottom", "width", "height"]:
