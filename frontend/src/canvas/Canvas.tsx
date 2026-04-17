@@ -81,30 +81,30 @@ export function Canvas() {
         return;
       }
 
-      // Left click on element → start drag (selection handled by Element's onClick)
+      // Left click on element → prepare drag (thresholded in mousemove)
       if (e.button === 0 && activeTool === 'select') {
         const target = e.target as HTMLElement;
         const node = target.closest('[data-paper-node]') as HTMLElement | null;
         if (node) {
           const nodeId = node.getAttribute('data-paper-node');
           if (nodeId) {
+            // Read current DOM position safely — node.style.left is empty for flow elements
+            const rawLeft = node.style.left;
+            const rawTop = node.style.top;
             dragRef.current = {
               nodeId,
               startX: e.clientX,
               startY: e.clientY,
-              // Read visual position directly from DOM (not store, avoids sync issues)
-              elX: parseFloat(node.style.left) || 0,
-              elY: parseFloat(node.style.top) || 0,
+              elX: parseFloat(rawLeft) || 0,
+              elY: parseFloat(rawTop) || 0,
               didDrag: false,
             };
             return;
           }
         }
         // Left click on empty canvas → deselect
-        if (!node) {
-          useEditorStore.getState().setSelection(null);
-          return;
-        }
+        useEditorStore.getState().setSelection(null);
+        return;
       }
 
       // Left click with drawing tool → start draw
@@ -125,16 +125,24 @@ export function Canvas() {
         return;
       }
 
-      // Drag element — direct DOM update (no store update during drag for performance)
+      // Drag element — threshold: only start DOM manipulation after 3px movement
+      const DRAG_THRESHOLD = 3;
       if (e.buttons === 1 && dragRef.current) {
-        dragRef.current.didDrag = true;
-        const { scale } = useEditorStore.getState().transform;
-        const dx = (e.clientX - dragRef.current.startX) / scale;
-        const dy = (e.clientY - dragRef.current.startY) / scale;
-        const node = document.querySelector(`[data-paper-node="${dragRef.current.nodeId}"]`) as HTMLElement | null;
-        if (node) {
-          node.style.left = `${dragRef.current.elX + dx}px`;
-          node.style.top = `${dragRef.current.elY + dy}px`;
+        const dx = e.clientX - dragRef.current.startX;
+        const dy = e.clientY - dragRef.current.startY;
+        // Activate drag only after threshold exceeded
+        if (!dragRef.current.didDrag && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
+          dragRef.current.didDrag = true;
+        }
+        if (dragRef.current.didDrag) {
+          const { scale } = useEditorStore.getState().transform;
+          const adx = dx / scale;
+          const ady = dy / scale;
+          const node = document.querySelector(`[data-paper-node="${dragRef.current.nodeId}"]`) as HTMLElement | null;
+          if (node) {
+            node.style.left = `${dragRef.current.elX + adx}px`;
+            node.style.top = `${dragRef.current.elY + ady}px`;
+          }
         }
         return;
       }
@@ -161,7 +169,7 @@ export function Canvas() {
         return;
       }
 
-      // End drag → write final position to store
+      // End drag → write final position to store only if threshold was exceeded
       if (dragRef.current) {
         const didDrag = dragRef.current.didDrag;
         const nodeId = dragRef.current.nodeId;
@@ -170,8 +178,8 @@ export function Canvas() {
           const scale = transform.scale;
           const dx = (e.clientX - dragRef.current.startX) / scale;
           const dy = (e.clientY - dragRef.current.startY) / scale;
-          const finalX = dragRef.current.elX + dx;
-          const finalY = dragRef.current.elY + dy;
+          const finalX = isNaN(dragRef.current.elX) ? 0 : dragRef.current.elX + dx;
+          const finalY = isNaN(dragRef.current.elY) ? 0 : dragRef.current.elY + dy;
           if (doc) {
             const el = doc.pages[doc.current_page].elements.find((el) => el.id === nodeId);
             if (el) {

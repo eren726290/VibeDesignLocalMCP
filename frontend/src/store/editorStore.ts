@@ -19,6 +19,7 @@ interface EditorState {
   setTransform: (t: Partial<Transform>) => void;
   expandedNodes: Set<string>;
   toggleExpanded: (nodeId: string) => void;
+  expandToNode: (nodeId: string) => void; // expand all ancestors so the node is visible in the layer tree
   history: Document[];
   historyIndex: number;
   pushHistory: () => void;
@@ -83,6 +84,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     return { expandedNodes: next };
   }),
+
+  expandToNode: (nodeId) => {
+    const { document, selectedArtboardId } = get();
+    if (!document) return;
+    const currentPage = document.pages.find((p) => p.id === selectedArtboardId)
+      ?? document.pages[document.current_page];
+    if (!currentPage) return;
+    const elementMap = new Map(currentPage.elements.map((el) => [el.id, el]));
+    const toExpand: string[] = [];
+    let curId: string | undefined = nodeId;
+    while (curId) {
+      const parentId = elementMap.get(curId)?.parentId;
+      if (parentId) toExpand.push(parentId);
+      curId = parentId;
+    }
+    if (toExpand.length === 0) return;
+    set((state) => {
+      const next = new Set(state.expandedNodes);
+      toExpand.forEach((id) => next.add(id));
+      return { expandedNodes: next };
+    });
+  },
 
   pushHistory: () => {
     const { document, history, historyIndex } = get();

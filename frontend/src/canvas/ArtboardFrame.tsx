@@ -272,7 +272,11 @@ function ElementNode({ element, elementsMap, isRoot }: { element: ElementType; e
   return (
     <Element key={element.id} element={element}>
       {positionedChildren.map((child) => (
-        <ElementNode key={child.id} element={child} elementsMap={elementsMap} isRoot={false} />
+        // Wrap in a div with stopPropagation — prevents clicks on this child
+        // from bubbling up to the parent Element's onClick handler
+        <div key={child.id} onClick={(e) => e.stopPropagation()}>
+          <ElementNode element={child} elementsMap={elementsMap} isRoot={false} />
+        </div>
       ))}
       {/* Inline text children rendered as inline spans to preserve per-element styling */}
       {inlineTexts.map((t, i) => (

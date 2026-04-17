@@ -34,6 +34,38 @@ def _parse_style(style_str: str) -> dict:
     return style
 
 
+def _collect_attrs(attrs: dict) -> dict:
+    """
+    Merge CSS style + SVG presentation attributes into a single style dict.
+    SVG attributes like fill, stroke, r, cx, cy, d, viewBox live in tag.attrs,
+    not in the style attribute — we need to capture them too.
+    """
+    style = _parse_style(attrs.get("style", ""))
+
+    # SVG presentation attributes — treat them as style keys so they reach React/SVG rendering
+    svg_attrs = [
+        # Shape-specific
+        "fill", "fillRule", "fillOpacity",
+        "stroke", "strokeWidth", "strokeLinecap", "strokeLinejoin", "strokeOpacity", "strokeDasharray",
+        "opacity",
+        # Geometry
+        "r", "rx", "ry", "cx", "cy", "x", "y", "x1", "y1", "x2", "y2",
+        "width", "height",
+        # Path & text
+        "d", "points", "pathLength",
+        # SVG container
+        "viewBox", "preserveAspectRatio", "xmlns",
+        # Text
+        "textAnchor", "dominantBaseline", "fontFamily", "fontSize", "fontWeight",
+        "letterSpacing", "textDecoration",
+    ]
+    for attr in svg_attrs:
+        if attr in attrs:
+            style[attr] = attrs[attr]
+
+    return style
+
+
 def _infer_type(tag: str, style: dict, text: str) -> str:
     """Infer element type from tag name, style, and text content."""
     if tag == "img":
@@ -118,7 +150,7 @@ def parse_html_elements(html: str) -> list[dict]:
 
     for tag in all_tags:
         attrs = dict(tag.attrs)
-        style = _parse_style(attrs.get("style", ""))
+        style = _collect_attrs(attrs)
 
         # The outermost element fills the artboard naturally.
         # Strip any layout props that would override natural flow — the artboard

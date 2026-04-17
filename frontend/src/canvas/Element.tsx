@@ -49,20 +49,17 @@ export const Element = React.memo(function Element({ element, children, isRoot }
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    // Read visual position from DOM — works for both absolute and flex/grid elements
-    const rect = elementRef.current?.getBoundingClientRect();
-    const canvas = document.getElementById('paper-canvas');
-    const canvasRect = canvas?.getBoundingClientRect();
-    const x = rect && canvasRect ? rect.left - canvasRect.left : parseFloat(styleLeft || '0');
-    const y = rect && canvasRect ? rect.top - canvasRect.top : parseFloat(styleTop || '0');
-    useEditorStore.getState().setSelection({
+    const { setSelection, expandToNode } = useEditorStore.getState();
+    setSelection({
       nodeId: element.id,
-      x,
-      y,
+      x: parseFloat(element.style.left || '0'),
+      y: parseFloat(element.style.top || '0'),
       width: parseFloat(element.style.width || '100'),
       height: parseFloat(element.style.height || '100'),
     });
-  }, [element.id, element.style.width, element.style.height]);
+    // Expand all ancestors in the layer tree so this element becomes visible
+    expandToNode(element.id);
+  }, [element.id, element.style.left, element.style.top, element.style.width, element.style.height]);
 
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -143,9 +140,9 @@ export const Element = React.memo(function Element({ element, children, isRoot }
   const style: React.CSSProperties = {
     ...element.style,
     ...(isRoot
-      ? { position: 'relative' as const, width: '100%' }             // fills artboard width, natural height
+      ? { position: 'relative' as const, width: '100%' }
       : hasExplicitAbsolute
-      ? { position: 'absolute' as const }                            // AI explicitly positioned
+      ? { position: 'absolute' as const }
       : isFrame
       ? { position: 'relative' as const }
       : {}),
