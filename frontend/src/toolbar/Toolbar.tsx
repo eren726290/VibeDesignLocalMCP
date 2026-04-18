@@ -1,7 +1,55 @@
 import { useEditorStore } from '../store/editorStore';
 import type { Tool } from '../types';
 
-// Paper's exact SVG icons (extracted from app.paper.design)
+// ─── Fit to canvas handler ─────────────────────────────────────────────────────
+
+function fitCanvas() {
+  const { document, setTransform } = useEditorStore.getState();
+  if (!document || document.pages.length === 0) return;
+
+  // Compute bounding box of all artboards (in canvas space)
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const page of document.pages) {
+    if (page.x < minX) minX = page.x;
+    if (page.y < minY) minY = page.y;
+    if (page.x + page.width > maxX) maxX = page.x + page.width;
+    if (page.y + page.height > maxY) maxY = page.y + page.height;
+  }
+
+  const bw = maxX - minX;
+  const bh = maxY - minY;
+  if (bw <= 0 || bh <= 0) return;
+
+  // Viewport area (subtract sidebar widths)
+  const vpW = window.innerWidth - 40 - 280;
+  const vpH = window.innerHeight;
+
+  // Scale to fit all artboards with 10% padding, cap at 2x
+  const padding = 0.1;
+  const scaleX = vpW / bw / (1 + padding);
+  const scaleY = vpH / bh / (1 + padding);
+  const newScale = Math.min(scaleX, scaleY, 2);
+
+  // Center the bounding box in the viewport
+  const finalTx = (vpW - bw * newScale) / 2 - minX * newScale;
+  const finalTy = (vpH - bh * newScale) / 2 - minY * newScale;
+
+  setTransform({ scale: newScale, translateX: finalTx, translateY: finalTy });
+}
+
+// ─── Fit icon: box with a centered dot ───────────────────────────────────────
+
+function FitIcon() {
+  return (
+    <svg width={18} height={18} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth={1.25}>
+      <rect x={2.5} y={2.5} width={13} height={13} rx={1.5} />
+      <circle cx={9} cy={9} r={1.5} fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+// ─── Tool icons ───────────────────────────────────────────────────────────────
+
 const icons: Record<Tool, JSX.Element> = {
   select: (
     <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinejoin="round">
@@ -80,6 +128,33 @@ export function Toolbar() {
           <div style={tool === 'rectangle' ? { width: 16, height: 16 } : tool === 'text' ? { width: 19, height: 14 } : { width: 20, height: 20 }}>{icons[tool]}</div>
         </button>
       ))}
+
+      {/* Spacer pushes the fit button to the bottom */}
+      <div style={{ flex: 1 }} />
+
+      {/* Fit to canvas */}
+      <button
+        title="Fit all artboards in view"
+        onClick={fitCanvas}
+        style={{
+          width: 36,
+          height: 32,
+          padding: 6,
+          background: 'transparent',
+          border: 'none',
+          borderRadius: 4,
+          cursor: 'pointer',
+          color: '#666',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'all 0.15s',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = '#aaa'; e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+        onMouseLeave={e => { e.currentTarget.style.color = '#666'; e.currentTarget.style.background = 'transparent'; }}
+      >
+        <FitIcon />
+      </button>
     </div>
   );
 }

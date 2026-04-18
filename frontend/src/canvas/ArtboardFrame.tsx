@@ -247,7 +247,7 @@ function getChildIds(elementId: string, elementsMap: Map<string, ElementType>): 
   return children;
 }
 
-function ElementNode({ element, elementsMap, isRoot }: { element: ElementType; elementsMap: Map<string, ElementType>; isRoot?: boolean }) {
+function ElementNode({ element, elementsMap, isRoot: _isRoot }: { element: ElementType; elementsMap: Map<string, ElementType>; isRoot?: boolean }) {
   const children = getChildIds(element.id, elementsMap);
 
   // Elements with text always go to positionedChildren (they need to render as block

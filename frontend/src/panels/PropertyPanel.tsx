@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import type { Page } from '../types';
+import type { Page, Element } from '../types';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -147,7 +147,6 @@ function ElementProps() {
   const isSvg = ['svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse'].includes(element.tag);
   const isCircle = element.tag === 'circle';
   const isRect = element.tag === 'rect';
-  const isLine = element.tag === 'line';
   const isSvgContainer = element.tag === 'svg';
 
   const hasText = element.text !== undefined;
@@ -301,6 +300,230 @@ function ElementProps() {
   );
 }
 
+// ─── Export helpers ────────────────────────────────────────────────────────────
+
+function styleToString(style: Record<string, string | number | undefined>): string {
+  return Object.entries(style)
+    .filter(([, v]) => v !== undefined && v !== '' && v !== null)
+    .map(([k, v]) => {
+      // CSS property names that need no unit
+      const noUnitProps = [
+        'opacity', 'zIndex', 'flexGrow', 'flexShrink', 'flexBasis',
+        'order', 'fontWeight', 'lineHeight', 'letterSpacing', 'wordSpacing',
+      ];
+      const strVal = String(v);
+      const needsUnit = !noUnitProps.includes(k) && /^-?\d+(\.\d+)?$/.test(strVal) && strVal !== '0';
+      return `${k}: ${strVal}${needsUnit && !strVal.endsWith('px') && !strVal.endsWith('%') && !strVal.endsWith('em') && !strVal.endsWith('rem') ? 'px' : ''}`;
+    })
+    .join('; ');
+}
+
+function buildElementHtml(el: Element, indent = '      '): string {
+  const style = styleToString(el.style as Record<string, string>);
+  const styleAttr = style ? ` style="${style}"` : '';
+  const text = el.text != null && el.text !== '' ? el.text : '';
+  if (text) {
+    return `${indent}<${el.tag}${styleAttr}>${text}</${el.tag}>`;
+  }
+  return `${indent}<${el.tag}${styleAttr} />`;
+}
+
+function buildArtboardHtml(page: Page): string {
+  const bg = page.backgroundColor || '#ffffff';
+  const children = page.elements
+    .map((el) => buildElementHtml(el))
+    .join('\n');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${page.name}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { width: ${page.width}px; min-height: ${page.height}px; background: ${bg}; }
+  </style>
+</head>
+<body>
+  <div style="position: relative; width: ${page.width}px; height: ${page.height}px; background: ${bg};">
+${children}
+  </div>
+</body>
+</html>`;
+}
+
+function buildElementSingleHtml(el: Element): string {
+  const style = styleToString(el.style as Record<string, string>);
+  const styleAttr = style ? ` style="${style}"` : '';
+  const text = el.text != null && el.text !== '' ? el.text : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${el.name || 'Element'}</title>
+  <style>body { margin: 0; }</style>
+</head>
+<body>
+  <${el.tag}${styleAttr}>${text}</${el.tag}>
+</body>
+</html>`;
+}
+
+function downloadBlob(content: string, filename: string, mimeType = 'text/html') {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function exportPng(elementId: string, _pageId: string) {
+  const node = globalThis.document.querySelector(`[data-paper-node="${elementId}"]`) as HTMLElement | null;
+  if (!node) return;
+  try {
+    const html2canvas = (await import('html2canvas')).default;
+    const canvas = await html2canvas(node, { backgroundColor: null, scale: 2 });
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${elementId}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  } catch (e) {
+    console.error('PNG export failed:', e);
+  }
+}
+
+// ─── Export Section ───────────────────────────────────────────────────────────
+
+type ExportType = 'html' | 'png';
+
+function ExportSection() {
+  const { document, selection, selectedArtboardId } = useEditorStore();
+  const [exportType, setExportType] = useState<ExportType>('html');
+  const [exporting, setExporting] = useState(false);
+
+  const currentPage = document?.pages[document.current_page];
+  const targetArtboardId = selectedArtboardId ?? currentPage?.id;
+  const targetArtboard = currentPage;
+
+  const hasTarget = !!(targetArtboardId || selection?.nodeId);
+
+  const handleExport = async () => {
+    if (!document || !targetArtboard) return;
+    setExporting(true);
+    try {
+      if (exportType === 'html') {
+        if (selection?.nodeId) {
+          // Export selected element
+          const el = targetArtboard.elements.find((e) => e.id === selection.nodeId);
+          if (el) {
+            downloadBlob(buildElementSingleHtml(el), `${el.name || el.id}.html`);
+          }
+        } else {
+          // Export entire artboard
+          downloadBlob(buildArtboardHtml(targetArtboard), `${targetArtboard.name || 'artboard'}.html`);
+        }
+      } else {
+        // PNG — needs a DOM node
+        const nodeId = selection?.nodeId;
+        if (nodeId) {
+          await exportPng(nodeId, targetArtboard.id);
+        } else {
+          // Export artboard — find the artboard DOM node
+          const artboardNode = globalThis.document.querySelector(`[data-paper-node="${targetArtboard.id}"]`) as HTMLElement | null;
+          if (artboardNode) {
+            try {
+              const html2canvas = (await import('html2canvas')).default;
+              const canvas = await html2canvas(artboardNode, { backgroundColor: targetArtboard.backgroundColor || '#ffffff', scale: 2 });
+              canvas.toBlob((blob) => {
+                if (!blob) return;
+                const url = URL.createObjectURL(blob);
+                const a = globalThis.document.createElement('a');
+                a.href = url;
+                a.download = `${targetArtboard.name || 'artboard'}.png`;
+                globalThis.document.body.appendChild(a);
+                a.click();
+                globalThis.document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              });
+            } catch (e) {
+              console.error('PNG export failed:', e);
+            }
+          }
+        }
+      }
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: '12px 16px', borderTop: '1px solid #333' }}>
+      <div style={{ color: '#888', fontSize: 10, textTransform: 'uppercase', marginBottom: 8 }}>Export</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+        {/* HTML radio */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+          <input
+            type="radio"
+            name="export-type"
+            checked={exportType === 'html'}
+            onChange={() => setExportType('html')}
+            style={{ accentColor: '#0066ff' }}
+          />
+          <span style={{ color: '#aaa', fontSize: 12 }}>HTML</span>
+        </label>
+        {/* PNG radio */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+          <input
+            type="radio"
+            name="export-type"
+            checked={exportType === 'png'}
+            onChange={() => setExportType('png')}
+            style={{ accentColor: '#0066ff' }}
+          />
+          <span style={{ color: '#aaa', fontSize: 12 }}>PNG</span>
+        </label>
+      </div>
+      {/* Target label */}
+      <div style={{ fontSize: 10, color: '#555', marginBottom: 8 }}>
+        {selection?.nodeId ? `Element: ${targetArtboard?.elements.find((e) => e.id === selection.nodeId)?.name || selection.nodeId}` : targetArtboard ? `Artboard: ${targetArtboard.name}` : 'Nothing selected'}
+      </div>
+      <button
+        onClick={handleExport}
+        disabled={!hasTarget || exporting}
+        style={{
+          width: '100%',
+          padding: '6px 12px',
+          background: hasTarget ? '#0066ff' : '#333',
+          color: hasTarget ? '#fff' : '#666',
+          border: 'none',
+          borderRadius: 4,
+          fontSize: 12,
+          fontWeight: 500,
+          cursor: hasTarget && !exporting ? 'pointer' : 'not-allowed',
+          fontFamily: 'system-ui, sans-serif',
+          transition: 'background 0.15s',
+        }}
+        onMouseEnter={e => { if (hasTarget) (e.currentTarget as HTMLButtonElement).style.background = '#0052cc'; }}
+        onMouseLeave={e => { if (hasTarget) (e.currentTarget as HTMLButtonElement).style.background = '#0066ff'; }}
+      >
+        {exporting ? 'Exporting…' : 'Export'}
+      </button>
+    </div>
+  );
+}
+
 // ─── Property Panel ───────────────────────────────────────────────────────────
 
 export function PropertyPanel() {
@@ -324,14 +547,18 @@ export function PropertyPanel() {
   return (
     <div className="paper-scroll" style={{
       width: 280, background: '#1a1a1a', borderLeft: '1px solid #333', overflow: 'auto',
+      display: 'flex', flexDirection: 'column',
     }}>
-      {selectedArtboardId ? (
-        <ArtboardProps page={document.pages.find(p => p.id === selectedArtboardId) || currentPage} />
-      ) : selection ? (
-        <ElementProps key={selection.nodeId} />
-      ) : (
-        <ArtboardProps page={currentPage} />
-      )}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        {selectedArtboardId ? (
+          <ArtboardProps page={document.pages.find(p => p.id === selectedArtboardId) || currentPage} />
+        ) : selection ? (
+          <ElementProps key={selection.nodeId} />
+        ) : (
+          <ArtboardProps page={currentPage} />
+        )}
+      </div>
+      <ExportSection />
     </div>
   );
 }
