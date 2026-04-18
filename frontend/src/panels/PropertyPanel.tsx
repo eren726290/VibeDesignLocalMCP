@@ -147,7 +147,6 @@ function ElementProps() {
   const isSvg = ['svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse'].includes(element.tag);
   const isCircle = element.tag === 'circle';
   const isRect = element.tag === 'rect';
-  const isLine = element.tag === 'line';
   const isSvgContainer = element.tag === 'svg';
 
   const hasText = element.text !== undefined;

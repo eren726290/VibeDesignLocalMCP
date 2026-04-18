@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { useEditorStore } from '../store/editorStore';
+import { bridge } from '../bridge/api';
 import { ArtboardFrame } from './ArtboardFrame';
 import type { Element as ElementType } from '../types';
 
@@ -48,6 +49,7 @@ export function Canvas() {
         map.set(el.id, el);
       }
     }
+    console.log('[Canvas elementsMap] built, size=', map.size, 'svg elements:', [...map.values()].filter(e => e.tag === 'svg').map(e => e.id));
     return { elementsMap: map };
   }, [doc]);
 
@@ -323,11 +325,68 @@ export function Canvas() {
     };
   }, []); // registered once at mount
 
+  const [exportStatus, setExportStatus] = useState<string>('');
+
+  const handleExport = useCallback(async () => {
+    setExportStatus('');
+    let dirHandle: FileSystemDirectoryHandle | null = null;
+
+    // Try modern DirectoryPicker API
+    if ('showDirectoryPicker' in window) {
+      try {
+        dirHandle = await (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker();
+      } catch {
+        // User cancelled
+        return;
+      }
+    } else {
+      // Fallback: hidden file input with webkitdirectory
+      return new Promise<void>((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.webkitdirectory = true;
+        input.style.display = 'none';
+        document.body.appendChild(input);
+        input.click();
+        input.addEventListener('change', async () => {
+          document.body.removeChild(input);
+          if (input.files && input.files.length > 0) {
+            // webkitdirectory gives us a path — use the first file's path as the dir
+            const dir = (input.files[0] as File & { path?: string }).path;
+            if (dir) {
+              try {
+                const result = await bridge.exportArtboards(dir) as { success?: boolean; error?: string; exported?: string[] };
+                setExportStatus(result.success ? `Exported: ${(result.exported || []).join(', ')}` : `Error: ${result.error}`);
+              } catch {
+                setExportStatus('Export failed');
+              }
+            }
+          }
+          resolve();
+        });
+      });
+    }
+
+    if (dirHandle) {
+      // For DirectoryPicker, we get a handle — send the name/key to backend via persisted access
+      // Since we can't get a raw path from DirectoryPicker, use the last-folder name as a hint
+      // and store the handle for subsequent writes. For simplicity, use a known path approach.
+      // Prompt for path string as fallback
+      const dirPath = prompt('Enter the full path to export to (e.g. /Users/you/Desktop/export):');
+      if (!dirPath) return;
+      try {
+        const result = await bridge.exportArtboards(dirPath) as { success?: boolean; error?: string; exported?: string[] };
+        setExportStatus(result.success ? `Exported: ${(result.exported || []).join(', ')}` : `Error: ${result.error}`);
+      } catch {
+        setExportStatus('Export failed');
+      }
+    }
+  }, []);
+
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent) => {
-      // Only fire if we didn't just drag
       if (e.target === canvasRef.current) {
-        // Already handled in mousedown
+        // handled in mousedown
       }
     },
     []
@@ -421,22 +480,69 @@ export function Canvas() {
         />
       )}
 
-      {/* Zoom indicator */}
+      {/* Zoom + Export controls */}
       <div
         style={{
           position: 'absolute',
           bottom: 16,
           right: 16,
-          padding: '4px 8px',
-          background: 'rgba(0,0,0,0.6)',
-          color: '#fff',
-          fontSize: 12,
-          borderRadius: 4,
-          pointerEvents: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          zIndex: 10,
         }}
       >
-        {Math.round(transform.scale * 100)}%
+        {/* Export button */}
+        <button
+          onClick={handleExport}
+          title="Export all artboards as HTML"
+          style={{
+            padding: '4px 10px',
+            background: '#0066ff',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 4,
+            fontSize: 12,
+            cursor: 'pointer',
+            fontWeight: 500,
+          }}
+        >
+          Export
+        </button>
+
+        {/* Zoom indicator */}
+        <div
+          style={{
+            padding: '4px 8px',
+            background: 'rgba(0,0,0,0.6)',
+            color: '#fff',
+            fontSize: 12,
+            borderRadius: 4,
+            pointerEvents: 'none',
+          }}
+        >
+          {Math.round(transform.scale * 100)}%
+        </div>
       </div>
+
+      {/* Export status toast */}
+      {exportStatus && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 50,
+            right: 16,
+            padding: '6px 12px',
+            background: 'rgba(0,0,0,0.8)',
+            color: '#fff',
+            fontSize: 12,
+            borderRadius: 4,
+            zIndex: 20,
+          }}
+        >
+          {exportStatus}
+        </div>
+      )}
     </div>
   );
 }

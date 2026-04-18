@@ -646,6 +646,14 @@ async def api_export_html(doc_id: str, pretty: bool = True):
     return doc_store.export_html(doc_id, pretty)
 
 
+@app.post("/api/documents/{doc_id}/export-artboards")
+async def api_export_artboards(doc_id: str, body: dict):
+    directory = body.get("directory", "")
+    if not directory:
+        return JSONResponse({"error": "directory is required"}, status_code=400)
+    return doc_store.export_artboards(doc_id, directory)
+
+
 @app.post("/api/documents/{doc_id}/screenshot")
 async def api_set_screenshot(doc_id: str, data: dict):
     doc_store.set_screenshot_data(doc_id, data.get("data", ""))

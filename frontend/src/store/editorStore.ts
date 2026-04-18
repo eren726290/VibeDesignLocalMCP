@@ -93,9 +93,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!currentPage) return;
     const elementMap = new Map(currentPage.elements.map((el) => [el.id, el]));
     const toExpand: string[] = [];
-    let curId: string | undefined = nodeId;
+    let curId: string | null | undefined = nodeId;
     while (curId) {
-      const parentId = elementMap.get(curId)?.parentId;
+      const parentId: string | null | undefined = elementMap.get(curId)?.parentId;
       if (parentId) toExpand.push(parentId);
       curId = parentId;
     }

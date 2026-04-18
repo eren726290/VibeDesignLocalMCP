@@ -45,9 +45,10 @@ def _collect_attrs(attrs: dict) -> dict:
     # SVG presentation attributes — treat them as style keys so they reach React/SVG rendering
     svg_attrs = [
         # Shape-specific
-        "fill", "fillRule", "fillOpacity",
-        "stroke", "strokeWidth", "strokeLinecap", "strokeLinejoin", "strokeOpacity", "strokeDasharray",
-        "opacity",
+        "fill", "fillRule", "fillOpacity", "floodOpacity",
+        "stroke", "strokeWidth", "strokeLinecap", "strokeLinejoin",
+        "strokeDasharray", "strokeOpacity", "strokeMiterlimit", "strokeDashoffset",
+        "opacity", "clipPath", "clipRule",
         # Geometry
         "r", "rx", "ry", "cx", "cy", "x", "y", "x1", "y1", "x2", "y2",
         "width", "height",
@@ -57,11 +58,35 @@ def _collect_attrs(attrs: dict) -> dict:
         "viewBox", "preserveAspectRatio", "xmlns",
         # Text
         "textAnchor", "dominantBaseline", "fontFamily", "fontSize", "fontWeight",
-        "letterSpacing", "textDecoration",
+        "letterSpacing", "textDecoration", "fontStyle", "fontVariant",
+        # Gradient & filter
+        "offset", "stopColor", "stopOpacity",
+        "gradientUnits", "spreadMethod", "gradientTransform",
+        "patternUnits", "patternContentUnits",
+        "clipPathUnits", "maskUnits", "maskContentUnits",
+        # Transform & links
+        "transform", "href", "xlinkHref",
     ]
+    def _camel_to_kebab(s: str) -> str:
+        """Convert camelCase to kebab-case."""
+        import re
+        return re.sub(r'([A-Z])', r'-\1', s).lower()
+
     for attr in svg_attrs:
-        if attr in attrs:
+        # BeautifulSoup html.parser lowercases attribute names and converts
+        # camelCase SVG attrs to kebab-case (viewBox→viewbox, stopColor→stop-color)
+        # Also preserve original camelCase as-is.
+        key_lower = attr.lower()
+        key_kebab = _camel_to_kebab(attr)
+        if key_lower in attrs:
+            style[attr] = attrs[key_lower]
+        elif key_kebab in attrs:
+            style[attr] = attrs[key_kebab]
+        elif attr in attrs:
             style[attr] = attrs[attr]
+        # Handle namespaced attrs (xlink:href stored as 'xlink:href' by BeautifulSoup)
+        if attr == 'xlinkHref' and 'xlink:href' in attrs:
+            style['xlinkHref'] = attrs['xlink:href']
 
     return style
 
@@ -156,9 +181,14 @@ def parse_html_elements(html: str) -> list[dict]:
         # Strip any layout props that would override natural flow — the artboard
         # provides the viewport dimensions (375×812 etc.). The frontend sets
         # width:100% for the root, so width/height from AI are redundant.
+        # Exception: SVG elements need width/height for their display size,
+        # and use viewBox for the internal coordinate system.
         if is_first:
             is_first = False
-            for key in ["position", "left", "top", "right", "bottom", "width", "height"]:
+            strip_keys = ["position", "left", "top", "right", "bottom"]
+            if tag.name != "svg":
+                strip_keys.extend(["width", "height"])
+            for key in strip_keys:
                 style.pop(key, None)
             # Ensure it doesn't overflow the artboard
             style["overflow"] = style.get("overflow", "hidden")

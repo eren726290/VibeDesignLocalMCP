@@ -247,7 +247,7 @@ function getChildIds(elementId: string, elementsMap: Map<string, ElementType>): 
   return children;
 }
 
-function ElementNode({ element, elementsMap, isRoot }: { element: ElementType; elementsMap: Map<string, ElementType>; isRoot?: boolean }) {
+function ElementNode({ element, elementsMap, inSvg = false }: { element: ElementType; elementsMap: Map<string, ElementType>; isRoot?: boolean; inSvg?: boolean }) {
   const children = getChildIds(element.id, elementsMap);
 
   // Elements with text always go to positionedChildren (they need to render as block
@@ -256,28 +256,51 @@ function ElementNode({ element, elementsMap, isRoot }: { element: ElementType; e
   // Flex/grid layout children without text/children: render as empty placeholder spans.
   const inlineTexts: string[] = [];
   const positionedChildren: ElementType[] = [];
+
+  // If this element is inside an SVG (passed down from parent), or IS an SVG itself,
+  // ALL children must go to positionedChildren — they need to render as <circle>/<path>,
+  // not as inline <span> (SVG rejects <span>).
+  const insideSvg = inSvg || element.tag === 'svg';
+
   for (const child of children) {
     const hasLayout = !!(child.style?.width || child.style?.height ||
       child.style?.position === 'absolute' || child.style?.position === 'relative');
     const hasText = child.text !== undefined && child.text !== null && child.text !== '';
     const childChildren = getChildIds(child.id, elementsMap);
-    if (!hasLayout && !hasText && childChildren.length === 0) {
-      // Truly inline placeholder: no layout, no text, no children
+    if (!hasLayout && !hasText && childChildren.length === 0 && !insideSvg) {
+      // Truly inline placeholder: no layout, no text, no children, and not inside SVG
       inlineTexts.push('');
     } else {
       positionedChildren.push(child);
     }
   }
 
+  // SVG container tags that must pass inSvg=true to their children.
+  // All SVG child elements (stop, circle inside defs, etc.) need to render as
+  // SVG elements, not as inline <span> placeholders.
+  const svgContainerTags = new Set([
+    'svg', 'g', 'defs', 'lineargradient', 'radialgradient',
+    'clippath', 'mask', 'pattern', 'symbol',
+  ]);
+
+  // SVG parent: children must be direct (no wrapper div) so they render as <circle>/<path> inside <svg>
+  const isSvgContainer = svgContainerTags.has(element.tag);
+  const renderedChildren = positionedChildren.map((child) =>
+    isSvgContainer ? (
+      // Pass inSvg=true so stop/circle/path inside defs/gradient/etc. render as SVG elements
+      <ElementNode key={child.id} element={child} elementsMap={elementsMap} inSvg={true} />
+    ) : (
+      // Wrap in a div with stopPropagation — prevents clicks on this child
+      // from bubbling up to the parent Element's onClick handler
+      <div key={child.id} onClick={(e) => e.stopPropagation()}>
+        <ElementNode element={child} elementsMap={elementsMap} />
+      </div>
+    )
+  );
+
   return (
     <Element key={element.id} element={element}>
-      {positionedChildren.map((child) => (
-        // Wrap in a div with stopPropagation — prevents clicks on this child
-        // from bubbling up to the parent Element's onClick handler
-        <div key={child.id} onClick={(e) => e.stopPropagation()}>
-          <ElementNode element={child} elementsMap={elementsMap} isRoot={false} />
-        </div>
-      ))}
+      {renderedChildren}
       {/* Inline text children rendered as inline spans to preserve per-element styling */}
       {inlineTexts.map((t, i) => (
         <span key={`text-${i}`}>{t}</span>

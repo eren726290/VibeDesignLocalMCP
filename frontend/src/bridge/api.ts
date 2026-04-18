@@ -120,6 +120,14 @@ export async function exportHtml(_docId: string, pretty: boolean = true) {
   });
 }
 
+/** Export all artboards as individual HTML files to a chosen directory */
+export async function exportArtboards(directory: string) {
+  return api(`/api/documents/${getActiveDocId()}/export-artboards`, {
+    method: 'POST',
+    body: JSON.stringify({ directory }),
+  });
+}
+
 export async function setScreenshotData(_docId: string, data: string) {
   return api(`/api/documents/${getActiveDocId()}/screenshot`, {
     method: 'POST',
@@ -151,6 +159,7 @@ declare global {
       deleteElement: (docId: string, elementId: string) => Promise<unknown>;
       duplicateElement: (docId: string, elementId: string) => Promise<unknown>;
       exportHtml: (docId: string, pretty?: boolean) => Promise<unknown>;
+      exportArtboards: (directory: string) => Promise<unknown>;
       setScreenshotData: (docId: string, data: string) => Promise<unknown>;
       setCurrentPage: (docId: string, index: number) => Promise<unknown>;
       getCurrentDocId: () => string;
@@ -172,6 +181,7 @@ export const bridge = {
   deletePage,
   duplicateElement,
   exportHtml,
+  exportArtboards,
   setScreenshotData,
   setCurrentPage,
   getCurrentDocId,

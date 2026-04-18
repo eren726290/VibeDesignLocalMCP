@@ -323,6 +323,93 @@ class DocumentStore:
             "file_path": doc.file_path,
         }
 
+    def export_artboards(self, doc_id: str, directory: str) -> dict:
+        """Export each artboard as a separate HTML file to the target directory.
+
+        Args:
+            doc_id: Document ID
+            directory: Target directory path
+
+        Returns:
+            dict with success status and list of exported files
+        """
+        doc = self.documents.get(doc_id)
+        if not doc:
+            return {"error": "Document not found"}
+
+        import re
+        import os as _os
+
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            return {"error": f"Directory does not exist: {directory}"}
+
+        exported = []
+        for page in doc.pages:
+            # Sanitize filename from artboard name
+            safe_name = re.sub(r'[^\w\-]', '_', page.name)
+            if not safe_name.strip('_'):
+                safe_name = "artboard"
+            filename = f"{safe_name}.html"
+            filepath = dir_path / filename
+
+            # Generate HTML for this single artboard
+            html = self._generate_single_page_html(doc, page)
+            filepath.write_text(html, encoding="utf-8")
+            exported.append(filename)
+
+        return {"success": True, "exported": exported, "directory": directory}
+
+    def _generate_single_page_html(self, doc: Document, page: Page) -> str:
+        """Generate HTML for a single artboard/page."""
+        def render_element(el: dict, indent: str) -> str:
+            style_str = "; ".join(f"{k}: {v}" for k, v in el.get("style", {}).items())
+            content = el.get("text", "") or ""
+            tag = el.get("tag", "div")
+            el_id = el.get("id", "")
+            children_ids = el.get("children", [])
+
+            # Build children map from current page
+            children_map = {e["id"]: e for e in page.elements}
+            children_html = ""
+            for cid in children_ids:
+                child = children_map.get(cid)
+                if child:
+                    children_html += render_element(child, indent + "  ")
+
+            inner = content + children_html
+            return f'{indent}<{tag} data-paper-node="{el_id}" style="{style_str}">{inner}</{tag}>\n'
+
+        # Root elements (no parentId)
+        roots = [el for el in page.elements if not el.get("parentId")]
+        elements_html = "".join(render_element(el, "  ") for el in roots)
+
+        # Background div wrapping all elements
+        bg_div = f"""<div style="width: {page.width}px; height: {page.height}px; background: {page.backgroundColor or '#ffffff'}; position: relative; overflow: hidden;">
+  {elements_html}</div>"""
+
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>{page.name}</title>
+  <style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    body {{
+      background: #f0f0f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px;
+    }}
+  </style>
+</head>
+<body>
+{bg_div}
+</body>
+</html>"""
+
     def _generate_html(self, doc: Document, pretty: bool = False) -> str:
         """Generate HTML file from document"""
         indent = "  " if pretty else ""
