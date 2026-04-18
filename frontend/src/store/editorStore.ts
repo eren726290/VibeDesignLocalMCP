@@ -173,6 +173,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     bridge.deleteElement(document.id, id)
       .catch(() => {})
       .finally(() => syncManager.resumeSync());
+    set({ selection: null });
     get().pushHistory();
   },
 

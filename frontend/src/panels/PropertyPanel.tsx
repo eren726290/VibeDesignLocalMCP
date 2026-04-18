@@ -121,7 +121,6 @@ function ArtboardProps({ page }: { page: Page }) {
 
 function ElementProps() {
   const { document, selection, updateElement } = useEditorStore();
-
   if (!document || !selection) return null;
   const currentPage = document.pages[document.current_page];
   const element = currentPage.elements.find((el) => el.id === selection.nodeId);
