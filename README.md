@@ -1,8 +1,8 @@
 # Paper Clone
 
 本地优先的 UI 设计工具，复刻 Paper 的核心体验。基于真实 HTML/CSS 渲染，通过 MCP 协议让 AI Agent（如 Claude Code）可以直接读写画布。
-
 ---
+![screenshot](./screenshot.jpg)
 
 ## 运行方式
 
@@ -24,11 +24,11 @@ cd /Users/teli/www/work/paper_clone_temp/frontend
 npm run dev
 ```
 
-- 前端地址：`http://localhost:5173`
+- 前端地址：`http://localhost:5175`
 
 ### 3. 打开浏览器
 
-访问 http://localhost:5173
+访问 http://localhost:5175
 
 ---
 
@@ -70,7 +70,7 @@ npm run dev
                │  HTTP API + 轮询同步
                ▼
 ┌──────────────────────────────────────────────┐
-│  React Frontend (Vite, port 5173)            │
+│  React Frontend (Vite, port 5175)            │
 │  ├── Canvas (position: absolute + inline)    │
 │  ├── Toolbar (Move/Pan/Frame/Rectangle/Text) │
 │  ├── Layer Panel (left)                      │
@@ -177,7 +177,7 @@ paper_clone_temp/
 
 ## 开发备注
 
-- **端口**：后端默认 `3004`，前端默认 `5173`
+- **端口**：后端默认 `3004`，前端默认 `5175`
 - **前端调试**：修改代码后 Vite HMR 自动热更新，无需手动刷新
 - **后端调试**：修改 Python 代码后需要手动重启后端
 - **AI 调试**：每次测试前确认后端进程在运行：`lsof -i :3004`
