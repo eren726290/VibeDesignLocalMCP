@@ -153,12 +153,16 @@ export function ArtboardFrame({ page, elementsMap }: { page: Page; elementsMap: 
     // Outer wrapper: positions the artboard on the canvas (frameRef tracks this for drag/resize)
     <div
       ref={frameRef}
+      data-paper-node={page.id}
       style={{
         position: 'absolute',
         left: page.x,
         top: page.y,
         width: page.width,
         height: page.height,
+        boxShadow: isSelected
+          ? '0 0 0 2px #0066ff, 0 4px 24px rgba(0,0,0,0.4)'
+          : '0 4px 24px rgba(0,0,0,0.3)',
       }}
     >
       {/* Inner frame: acts as positioning context for absolute-positioned children */}
@@ -169,14 +173,12 @@ export function ArtboardFrame({ page, elementsMap }: { page: Page; elementsMap: 
           width: '100%',
           height: '100%',
           background: page.backgroundColor || '#ffffff',
-          boxShadow: isSelected
-            ? '0 0 0 2px #0066ff, 0 4px 24px rgba(0,0,0,0.4)'
-            : '0 4px 24px rgba(0,0,0,0.3)',
           overflow: 'visible',
         }}
       >
       {/* Header - drag handle */}
       <div
+        data-paper-ui
         onMouseDown={handleDragStart}
         style={{
           position: 'absolute',
@@ -214,7 +216,7 @@ export function ArtboardFrame({ page, elementsMap }: { page: Page; elementsMap: 
 
       {/* Selection border */}
       {isSelected && (
-        <div style={{
+        <div data-paper-ui style={{
           position: 'absolute', inset: 0,
           border: '2px solid #0066ff',
           pointerEvents: 'none', zIndex: 10,
@@ -224,7 +226,7 @@ export function ArtboardFrame({ page, elementsMap }: { page: Page; elementsMap: 
       {/* Resize handles */}
       {isSelected && HANDLES.map((h) => (
         <div
-          key={h}
+          data-paper-ui
           onMouseDown={(e) => handleResizeStart(e, h)}
           style={{
             position: 'absolute', width: 8, height: 8,

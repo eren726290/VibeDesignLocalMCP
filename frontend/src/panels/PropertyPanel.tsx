@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import type { Page, Element } from '../types';
+import type { Page } from '../types';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -302,70 +302,20 @@ function ElementProps() {
 
 // ─── Export helpers ────────────────────────────────────────────────────────────
 
-function styleToString(style: Record<string, string | number | undefined>): string {
-  return Object.entries(style)
-    .filter(([, v]) => v !== undefined && v !== '' && v !== null)
-    .map(([k, v]) => {
-      // CSS property names that need no unit
-      const noUnitProps = [
-        'opacity', 'zIndex', 'flexGrow', 'flexShrink', 'flexBasis',
-        'order', 'fontWeight', 'lineHeight', 'letterSpacing', 'wordSpacing',
-      ];
-      const strVal = String(v);
-      const needsUnit = !noUnitProps.includes(k) && /^-?\d+(\.\d+)?$/.test(strVal) && strVal !== '0';
-      return `${k}: ${strVal}${needsUnit && !strVal.endsWith('px') && !strVal.endsWith('%') && !strVal.endsWith('em') && !strVal.endsWith('rem') ? 'px' : ''}`;
-    })
-    .join('; ');
-}
-
-function buildElementHtml(el: Element, indent = '      '): string {
-  const style = styleToString(el.style as Record<string, string>);
-  const styleAttr = style ? ` style="${style}"` : '';
-  const text = el.text != null && el.text !== '' ? el.text : '';
-  if (text) {
-    return `${indent}<${el.tag}${styleAttr}>${text}</${el.tag}>`;
-  }
-  return `${indent}<${el.tag}${styleAttr} />`;
-}
-
-function buildArtboardHtml(page: Page): string {
-  const bg = page.backgroundColor || '#ffffff';
-  const children = page.elements
-    .map((el) => buildElementHtml(el))
-    .join('\n');
+function wrapHtml(content: string, width: number, height: number, bg: string, title: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${page.name}</title>
+  <title>${title}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { width: ${page.width}px; min-height: ${page.height}px; background: ${bg}; }
+    body { width: ${width}px; min-height: ${height}px; background: ${bg}; }
   </style>
 </head>
 <body>
-  <div style="position: relative; width: ${page.width}px; height: ${page.height}px; background: ${bg};">
-${children}
-  </div>
-</body>
-</html>`;
-}
-
-function buildElementSingleHtml(el: Element): string {
-  const style = styleToString(el.style as Record<string, string>);
-  const styleAttr = style ? ` style="${style}"` : '';
-  const text = el.text != null && el.text !== '' ? el.text : '';
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${el.name || 'Element'}</title>
-  <style>body { margin: 0; }</style>
-</head>
-<body>
-  <${el.tag}${styleAttr}>${text}</${el.tag}>
+${content}
 </body>
 </html>`;
 }
@@ -420,19 +370,42 @@ function ExportSection() {
   const hasTarget = !!(targetArtboardId || selection?.nodeId);
 
   const handleExport = async () => {
+    console.log('[Export] handleExport called', { exportType, selection: selection?.nodeId, targetArtboardId, targetArtboardId2: targetArtboard?.id });
     if (!document || !targetArtboard) return;
     setExporting(true);
     try {
       if (exportType === 'html') {
         if (selection?.nodeId) {
-          // Export selected element
-          const el = targetArtboard.elements.find((e) => e.id === selection.nodeId);
-          if (el) {
-            downloadBlob(buildElementSingleHtml(el), `${el.name || el.id}.html`);
+          // Export selected element — serialize DOM node directly
+          const elNode = globalThis.document.querySelector(`[data-paper-node="${selection.nodeId}"]`);
+          console.log('[Export] elNode found:', !!elNode, selection.nodeId);
+          if (elNode) {
+            const innerHtml = new XMLSerializer().serializeToString(elNode);
+            const html = wrapHtml(innerHtml, targetArtboard.width, targetArtboard.height, targetArtboard.backgroundColor || '#ffffff', elNode.getAttribute('data-paper-name') || selection.nodeId);
+            console.log('[Export] element html length:', innerHtml.length);
+            downloadBlob(html, `${elNode.getAttribute('data-paper-name') || selection.nodeId}.html`);
+          } else {
+            console.log('[Export] elNode is null, nothing exported');
           }
         } else {
-          // Export entire artboard
-          downloadBlob(buildArtboardHtml(targetArtboard), `${targetArtboard.name || 'artboard'}.html`);
+          // Export entire artboard — clone the DOM, strip editor-only UI, serialize
+          const artboardNode = globalThis.document.querySelector(`[data-paper-node="${targetArtboard.id}"]`) as HTMLElement | null;
+          console.log('[Export] artboardNode found:', !!artboardNode, targetArtboard.id);
+          if (artboardNode) {
+            // Clone so we don't mutate the live DOM
+            const clone = artboardNode.cloneNode(true) as HTMLElement;
+            // Remove editor-only UI elements (header, selection border, resize handles)
+            clone.querySelectorAll('[data-paper-ui]').forEach(el => el.remove());
+            // Restore dimensions after removing style
+            clone.setAttribute('style', `width: ${targetArtboard.width}px; height: ${targetArtboard.height}px;`);
+            // Serialize the cleaned content
+            const content = new XMLSerializer().serializeToString(clone);
+            const html = wrapHtml(content, targetArtboard.width, targetArtboard.height, targetArtboard.backgroundColor || '#ffffff', targetArtboard.name);
+            console.log('[Export] html length:', content.length);
+            downloadBlob(html, `${targetArtboard.name || 'artboard'}.html`);
+          } else {
+            console.log('[Export] artboardNode is null, nothing exported');
+          }
         }
       } else {
         // PNG — needs a DOM node
@@ -440,12 +413,21 @@ function ExportSection() {
         if (nodeId) {
           await exportPng(nodeId, targetArtboard.id);
         } else {
-          // Export artboard — find the artboard DOM node
+          // Export artboard as PNG — find the artboard DOM node
           const artboardNode = globalThis.document.querySelector(`[data-paper-node="${targetArtboard.id}"]`) as HTMLElement | null;
           if (artboardNode) {
+            // Clone so we don't mutate the live DOM, strip editor-only UI
+            const clone = artboardNode.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll('[data-paper-ui]').forEach(el => el.remove());
+            clone.setAttribute('style', `width: ${targetArtboard.width}px; height: ${targetArtboard.height}px;`);
+            // Temporarily attach clone to DOM so html2canvas can measure it
+            clone.style.position = 'fixed';
+            clone.style.left = '-9999px';
+            clone.style.top = '0';
+            globalThis.document.body.appendChild(clone);
             try {
               const html2canvas = (await import('html2canvas')).default;
-              const canvas = await html2canvas(artboardNode, { backgroundColor: targetArtboard.backgroundColor || '#ffffff', scale: 2 });
+              const canvas = await html2canvas(clone, { backgroundColor: targetArtboard.backgroundColor || '#ffffff', scale: 2 });
               canvas.toBlob((blob) => {
                 if (!blob) return;
                 const url = URL.createObjectURL(blob);
@@ -459,6 +441,8 @@ function ExportSection() {
               });
             } catch (e) {
               console.error('PNG export failed:', e);
+            } finally {
+              globalThis.document.body.removeChild(clone);
             }
           }
         }

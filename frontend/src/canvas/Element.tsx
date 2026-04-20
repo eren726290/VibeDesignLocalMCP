@@ -214,7 +214,7 @@ export const Element = React.memo(function Element({ element, children, isRoot }
           width={svgAttrs.width}
           height={svgAttrs.height}
         >
-          {element.text !== undefined && (
+          {element.text !== undefined && element.text !== null && element.text !== '' && (
             <span style={{ display: 'block', whiteSpace: 'pre-wrap' }}>{element.text}</span>
           )}
           {children}
@@ -307,7 +307,7 @@ export const Element = React.memo(function Element({ element, children, isRoot }
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
     >
-      {element.text !== undefined && (
+      {element.text !== undefined && element.text !== null && element.text !== '' && (
         <span style={{ display: 'block', whiteSpace: 'pre-wrap' }}>{element.text}</span>
       )}
 
