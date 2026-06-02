@@ -1,16 +1,16 @@
-# Paper Clone - 开发计划
+# Paper Clone - Development Plan
 
-## 项目概述
+## Overview
 
-复刻 Paper 设计工具，做一个本地优先、可离线使用的设计软件。通过 MCP 协议让 AI Agent（如 Claude Code）可以读取和修改设计。
+Recreate the Paper design tool as a local-first, offline-capable application. Use MCP so AI agents such as Claude Code can read and modify designs.
 
-- **定位**：Paper 的开源本地 clone
-- **核心特性**：基于 HTML/CSS 的真实画布渲染 + 标准 MCP Server
-- **打包**：pywebview 打包成 macOS 应用
+- **Positioning**: an open-source local clone of Paper
+- **Core features**: real HTML/CSS canvas rendering plus a standard MCP server
+- **Packaging**: bundle as a macOS app with pywebview
 
 ---
 
-## 技术架构
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -22,9 +22,9 @@
 ┌─────────────────────────────────────────────────────────┐
 │  Python FastAPI Backend (port 3004)                    │
 │  ├── MCP Server (POST /mcp)                           │
-│  └── Document Store (HTML 文件)                        │
+│  └── Document Store (HTML files)                        │
 └────────────┬────────────────────────────────────────────┘
-             │  HTTP API + 轮询同步
+             │  HTTP API + polling sync
              ▼
 ┌─────────────────────────────────────────────────────────┐
 │  React Frontend (Vite dev server)                      │
@@ -36,99 +36,99 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 关键设计决策
+### Key design decisions
 
-- **渲染**：真实 HTML/CSS DOM，`position: absolute` + inline styles（和 Paper 完全一致）
-- **文档格式**：`.html` 文件作为源格式，元数据存储在 `data-paper-*` 属性和 `<meta>` 标签
-- **MCP 协议**：标准 Streamable HTTP transport，Claude Code 可直接连接
-- **前端同步**：前端轮询后端每 1 秒同步文档状态
-- **通信流**：MCP Tool Call → Python Handler → Frontend polling sync
-
----
-
-## 功能清单
-
-### 第一阶段（MCP + 核心渲染） ✅ 基本完成
-
-- [x] 项目脚手架搭建（FastAPI + Vite + React + pywebview）
-- [x] MCP Server 实现（19 个 tools）
-- [x] 画布渲染引擎（position: absolute + inline styles）
-- [x] 工具栏（Move/Pan/Frame/Rectangle/Text）
-- [x] 前端轮询同步
-- [ ] 文件打开/保存对话框（pywebview native dialog）
-- [ ] 工具栏 SVG 图标
-
-### 第二阶段（编辑器交互） ✅ 基本完成
-
-- [x] 元素选中
-- [x] 拖拽移动
-- [x] 调整大小（resize handle — ArtboardFrame 8点缩放 + Element 4点缩放）
-- [x] 画布缩放（鼠标滚轮 ⌘+ / ⌘-）
-- [x] 画布平移（Pan 工具 + 空格拖拽）
-- [x] 撤销/重做（Zustand history）
-- [x] 右侧属性面板（颜色、字体、尺寸等）
-- [x] 左侧图层面板（节点层级管理）
-- [ ] 双击文本编辑
-- [ ] 键盘快捷键完善（右键菜单 Copy/Paste/Duplicate 等）
-
-### 第三阶段（完整功能）🔄 进行中
-
-- [x] 多页面/多 Artboard 支持（canvas 同时展示所有 artboard，可拖拽/缩放，属性实时同步后端）
-- [ ] 复制/粘贴
-- [ ] 对齐辅助线
-- [ ] 导出美化 HTML
-- [ ] 工具栏 SVG 图标（复用 Paper 原图标）
-
-### 第四阶段（打包与发布）
-
-- [ ] pywebview 桌面打包配置
-- [ ] macOS .app 打包
+- **Rendering**: real HTML/CSS DOM, `position: absolute` + inline styles (same as Paper)
+- **Document format**: `.html` files as the source format, with metadata stored in `data-paper-*` attributes and `<meta>` tags
+- **MCP protocol**: standard Streamable HTTP transport, directly connectable from Claude Code
+- **Frontend sync**: the frontend polls the backend every second to sync document state
+- **Communication flow**: MCP tool call -> Python handler -> frontend polling sync
 
 ---
 
-## MCP Tools 清单（19 个，全部实现）
+## Feature List
 
-### 文档操作
-- `get_basic_info` — 获取文档信息
-- `create_artboard` — 创建新页面
-- `get_tree_summary` — 获取节点树摘要
+### Phase 1 (MCP + core rendering) ✅ Mostly complete
 
-### 节点查询
-- `get_children` — 获取子节点
-- `get_node_info` — 获取节点详细信息
-- `get_selection` — 获取当前选中节点
-- `get_screenshot` — 截图
+- [x] Project scaffold setup (FastAPI + Vite + React + pywebview)
+- [x] MCP server implementation (19 tools)
+- [x] Canvas rendering engine (position: absolute + inline styles)
+- [x] Toolbar (Move/Pan/Frame/Rectangle/Text)
+- [x] Frontend polling sync
+- [ ] File open/save dialog (pywebview native dialog)
+- [ ] Toolbar SVG icons
 
-### 节点创建
-- `write_html` — 写入 HTML 片段创建节点
-- `duplicate_nodes` — 复制节点
+### Phase 2 (Editor interactions) ✅ Mostly complete
 
-### 节点修改
-- `update_styles` — 更新样式
-- `set_text_content` — 设置文本内容
-- `rename_nodes` — 重命名节点
-- `finish_working_on_nodes` — 标记操作完成
+- [x] Element selection
+- [x] Drag to move
+- [x] Resize handles (ArtboardFrame 8-point resize + Element 4-point resize)
+- [x] Canvas zoom (mouse wheel, Cmd+ / Cmd-)
+- [x] Canvas pan (Pan tool + space-drag)
+- [x] Undo/redo (Zustand history)
+- [x] Right properties panel (colors, fonts, sizes, etc.)
+- [x] Left layers panel (node hierarchy management)
+- [ ] Double-click text editing
+- [ ] Keyboard shortcut polish (context menu Copy/Paste/Duplicate, etc.)
 
-### 样式导出
-- `get_computed_styles` — 获取计算后样式
-- `get_jsx` — 导出为 JSX 代码
-- `get_font_family_info` — 获取字体信息
+### Phase 3 (Full features) 🔄 In progress
 
-### 文件操作
-- `save_document` — 保存文档
-- `open_document` — 打开文档
-- `export_html` — 导出 HTML
+- [x] Multi-page/multi-artboard support (canvas shows all artboards at once, supports drag/zoom, and syncs properties with the backend in real time)
+- [ ] Copy/paste
+- [ ] Alignment guides
+- [ ] Export formatted HTML
+- [ ] Toolbar SVG icons (reuse original Paper icons)
+
+### Phase 4 (Packaging and release)
+
+- [ ] pywebview desktop packaging configuration
+- [ ] macOS .app packaging
 
 ---
 
-## 文件结构
+## MCP Tools List (19 tools, all implemented)
+
+### Document operations
+- `get_basic_info` — Get document information
+- `create_artboard` — Create a new page
+- `get_tree_summary` — Get a node tree summary
+
+### Node queries
+- `get_children` — Get child nodes
+- `get_node_info` — Get detailed node information
+- `get_selection` — Get currently selected nodes
+- `get_screenshot` — Screenshot
+
+### Node creation
+- `write_html` — Write an HTML fragment to create nodes
+- `duplicate_nodes` — Duplicate nodes
+
+### Node modifications
+- `update_styles` — Update styles
+- `set_text_content` — Set text content
+- `rename_nodes` — Rename nodes
+- `finish_working_on_nodes` — Mark operation complete
+
+### Style export
+- `get_computed_styles` — Get computed styles
+- `get_jsx` — Export JSX code
+- `get_font_family_info` — Get font information
+
+### File operations
+- `save_document` — Save document
+- `open_document` — Open document
+- `export_html` — Export HTML
+
+---
+
+## File Structure
 
 ```
 paper_clone/
 ├── backend/
-│   ├── main.py              # FastAPI 入口 (port 3004) + MCP Server
-│   ├── document.py           # 文档存储 (HTML 文件)
-│   ├── handlers/             # MCP handlers (已合并到 main.py)
+│   ├── main.py              # FastAPI entry point (port 3004) + MCP Server
+│   ├── document.py           # Document storage (HTML files)
+│   ├── handlers/             # MCP handlers (merged into main.py)
 │   │   └── mcp_handler.py
 │   └── requirements.txt
 ├── frontend/
@@ -151,46 +151,46 @@ paper_clone/
 │   ├── vite.config.ts
 │   └── package.json
 ├── desktop/
-│   └── main.py              # pywebview 入口
+│   └── main.py              # pywebview entry point
 └── plan.md
 ```
 
 ---
 
-## 当前阶段任务
+## Current tasks
 
-### 第一阶段完成情况
+### Phase 1 status
 
-✅ MCP Server 在 127.0.0.1:3004/mcp 运行
-✅ 前端在 http://localhost:5173 运行
-✅ MCP write_html 创建元素成功
-✅ 前端轮询同步元素到画布
-✅ HTML 导出正常
+✅ MCP Server running at 127.0.0.1:3004/mcp
+✅ Frontend running at http://localhost:5173
+✅ MCP write_html successfully creates elements
+✅ Frontend polling syncs elements to the canvas
+✅ HTML export works
 
-**待完成**：
-- pywebview 打包（需要 native dialog 支持）
-- 文件打开/保存功能
-- SVG 工具栏图标
-- MCP update_artboard 工具（x/y/width/height/name/backgroundColor）
+**Remaining**:
+- pywebview packaging (requires native dialog support)
+- File open/save support
+- SVG toolbar icons
+- MCP update_artboard tool (x/y/width/height/name/backgroundColor)
 
 ---
 
-## 启动方式
+## Startup
 
 ```bash
-# 后端
+# Backend
 cd backend && python main.py
 
-# 前端（开发模式）
+# Frontend (development mode)
 cd frontend && npm run dev
 
-# 桌面应用（打包后）
+# Desktop app (after packaging)
 cd desktop && python main.py
 ```
 
-### Claude Code MCP 配置
+### Claude Code MCP Config
 
-在 Claude Code 的 MCP 配置中添加：
+Add the following to the Claude Code MCP config file:
 
 ```json
 {
@@ -203,4 +203,4 @@ cd desktop && python main.py
 }
 ```
 
-或者直接使用 HTTP 方式调用 MCP 端点。
+Or call the MCP endpoint directly over HTTP.

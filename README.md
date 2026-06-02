@@ -1,40 +1,40 @@
 # Paper Clone
 
-本地优先的 UI 设计工具，复刻 Paper 的核心体验。基于真实 HTML/CSS 渲染，通过 MCP 协议让 AI Agent（如 Claude Code）可以直接读写画布。
+A local-first UI design tool that recreates the core Paper experience. It uses real HTML/CSS rendering and MCP so AI agents such as Claude Code can directly read and write the canvas.
 ---
 ![screenshot](./screenshot.jpg)
 
-## 运行方式
+## Run
 
-### 1. 启动后端（FastAPI + MCP Server）
+### 1. Start the backend (FastAPI + MCP Server)
 
 ```bash
 cd /Users/teli/www/work/paper_clone_temp/backend
 python main.py
 ```
 
-- 后端地址：`http://127.0.0.1:3004`
-- MCP 端点：`POST http://127.0.0.1:3004/mcp`
-- 健康检查：`GET http://127.0.0.1:3004/health`
+- Backend URL:`http://127.0.0.1:3004`
+- MCP endpoint:`POST http://127.0.0.1:3004/mcp`
+- Health check:`GET http://127.0.0.1:3004/health`
 
-### 2. 启动前端（Vite + React）
+### 2. Start the frontend (Vite + React)
 
 ```bash
 cd /Users/teli/www/work/paper_clone_temp/frontend
 npm run dev
 ```
 
-- 前端地址：`http://localhost:5175`
+- Frontend URL:`http://localhost:5175`
 
-### 3. 打开浏览器
+### 3. Open the browser
 
-访问 http://localhost:5175
+Open http://localhost:5175 in the browser
 
 ---
 
-## Claude Code MCP 配置
+## Claude Code MCP Config
 
-在 Claude Code 的 MCP 配置文件（通常是 `~/.claude/settings.json`）中添加：
+Add the following to the Claude Code MCP config file (usually `~/.claude/settings.json`):
 
 ```json
 {
@@ -47,12 +47,12 @@ npm run dev
 }
 ```
 
-> Claude Code 会自动使用 `/mcp` 的 `initialize` 响应做协议握手，然后通过 HTTP POST 调用 tools。
-> 每次 MCP 调用会在请求头中传递 `x-paper-doc-id: default`，后端据此找到对应的文档。
+> Claude Code will automatically use the `/mcp` `initialize` response to perform the protocol handshake, then call tools over HTTP POST.
+> Each MCP call passes `x-paper-doc-id: default` in the request header so the backend can find the matching document.
 
 ---
 
-## 技术架构
+## Architecture
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -67,7 +67,7 @@ npm run dev
 │  ├── Document Store (in-memory)              │
 │  └── HTML Parser                             │
 └──────────────┬───────────────────────────────┘
-               │  HTTP API + 轮询同步
+               │  HTTP API + polling sync
                ▼
 ┌──────────────────────────────────────────────┐
 │  React Frontend (Vite, port 5175)            │
@@ -79,73 +79,73 @@ npm run dev
 └──────────────────────────────────────────────┘
 ```
 
-- **渲染**：真实 HTML/CSS DOM，`position: absolute` + inline styles
-- **前端同步**：前端每 1 秒轮询后端，拉取 AI/MCP 的修改
-- **MCP 通信**：AI 调用 tool → 后端处理 → 前端 polling 同步状态
+- **Rendering**: real HTML/CSS DOM, `position: absolute` + inline styles
+- **Frontend sync**: the frontend polls the backend every second to pull AI/MCP changes
+- **MCP communication**: AI calls a tool → backend handles it → frontend polling syncs the state
 
 ---
 
-## MCP Tools（21 个）
+## MCP Tools (21)
 
-### 文档操作
-- `get_basic_info` — 获取文档基本信息
-- `create_artboard` — 创建新 Artboard/页面
-- `delete_artboard` — 删除 Artboard
-- `update_artboard` — 更新 Artboard 属性（位置/尺寸/名称/背景色）
-- `save_document` — 保存文档
-- `open_document` — 打开 HTML 文件
-- `export_html` — 导出美化 HTML
+### Document operations
+- `get_basic_info` — Get basic document information
+- `create_artboard` — Create a new artboard/page
+- `delete_artboard` — Delete artboard
+- `update_artboard` — Update artboard properties (position, size, name, background color)
+- `save_document` — Save document
+- `open_document` — Open an HTML file
+- `export_html` — Export formatted HTML
 
-### 节点查询
-- `get_tree_summary` — 获取节点树摘要
-- `get_children` — 获取子节点
-- `get_node_info` — 获取节点详细信息
-- `get_selection` — 获取当前选中节点
-- `get_screenshot` — 截图数据
-- `get_computed_styles` — 获取计算后样式
-- `get_jsx` — 导出为 JSX 代码
-- `get_font_family_info` — 获取字体信息
+### Node queries
+- `get_tree_summary` — Get a node tree summary
+- `get_children` — Get child nodes
+- `get_node_info` — Get detailed node information
+- `get_selection` — Get currently selected nodes
+- `get_screenshot` — Screenshot data
+- `get_computed_styles` — Get computed styles
+- `get_jsx` — Export JSX code
+- `get_font_family_info` — Get font information
 
-### 节点修改
-- `write_html` — 写入 HTML 创建节点
-- `duplicate_nodes` — 复制节点
-- `update_styles` — 更新样式
-- `set_text_content` — 设置文本内容
-- `rename_nodes` — 重命名节点
-- `delete_nodes` — 删除节点
+### Node modifications
+- `write_html` — Write HTML to create nodes
+- `duplicate_nodes` — Duplicate nodes
+- `update_styles` — Update styles
+- `set_text_content` — Set text content
+- `rename_nodes` — Rename nodes
+- `delete_nodes` — Delete nodes
 
 ---
 
-## 快捷键
+## Shortcuts
 
-| 快捷键 | 功能 |
+| Shortcut | Function |
 |--------|------|
-| `V` | 选择工具（Move） |
-| `H` | 平移工具（Pan） |
-| `R` | 矩形工具（Rectangle） |
-| `T` | 文本工具（Text） |
-| `F` | Frame 工具 |
-| `Space` + 拖拽 | 平移画布 |
-| `Cmd + =` / `Cmd + -` | 放大 / 缩小 |
-| `Cmd + C` | 复制选中元素 |
-| `Cmd + V` | 粘贴 |
-| `Cmd + D` | 复制并偏移 |
-| `Delete` / `Backspace` | 删除选中元素 |
-| `Escape` | 取消选择 |
-| `双击文本元素` | 编辑文本 |
+| `V` | Move tool |
+| `H` | Pan tool |
+| `R` | Rectangle tool |
+| `T` | Text tool |
+| `F` | Frame tool |
+| `Space` + drag | Pan canvas |
+| `Cmd + =` / `Cmd + -` | Zoom in / out |
+| `Cmd + C` | Copy selected element |
+| `Cmd + V` | Paste |
+| `Cmd + D` | Duplicate with offset |
+| `Delete` / `Backspace` | Delete selected element |
+| `Escape` | Deselect |
+| `Double-click text elements` | Edit text |
 
 ---
 
-## 文件结构
+## File Structure
 
 ```
 paper_clone_temp/
 ├── backend/
-│   ├── main.py          # FastAPI 入口 + MCP Server (port 3004)
-│   ├── document.py      # 文档存储
-│   ├── parse_html.py    # HTML 解析器
-│   ├── mcp_server.py    # MCP 协议处理
-│   ├── mcp_stdio.js     # stdio bridge（供 MCP 客户端使用）
+│   ├── main.py          # FastAPI entry point + MCP Server (port 3004)
+│   ├── document.py      # Document storage
+│   ├── parse_html.py    # HTML parser
+│   ├── mcp_server.py    # MCP protocol handling
+│   ├── mcp_stdio.js     # stdio bridge (used by MCP clients)
 │   ├── handlers/
 │   │   └── mcp_handler.py
 │   └── requirements.txt
@@ -169,16 +169,16 @@ paper_clone_temp/
 │   ├── vite.config.ts
 │   └── package.json
 ├── desktop/
-│   └── main.py          # pywebview 桌面入口（TODO）
+│   └── main.py          # pywebview desktop entry point (TODO)
 └── README.md
 ```
 
 ---
 
-## 开发备注
+## Development Notes
 
-- **端口**：后端默认 `3004`，前端默认 `5175`
-- **前端调试**：修改代码后 Vite HMR 自动热更新，无需手动刷新
-- **后端调试**：修改 Python 代码后需要手动重启后端
-- **AI 调试**：每次测试前确认后端进程在运行：`lsof -i :3004`
-- **测试 MCP**：直接 curl 测试：`curl -X POST http://127.0.0.1:3004/mcp -H "Content-Type: application/json" -d '{"method":"initialize","params":{},"id":1}'`
+- **Ports**: backend defaults to `3004`, frontend defaults to `5175`
+- **Frontend debugging**: after code changes, Vite HMR updates automatically, so no manual refresh is needed
+- **Backend debugging**: after changing Python code, restart the backend manually
+- **AI debugging**: before each test, confirm the backend process is running: `lsof -i :3004`
+- **Test MCP**: test directly with curl: `curl -X POST http://127.0.0.1:3004/mcp -H "Content-Type: application/json" -d '{"method":"initialize","params":{},"id":1}'`

@@ -52,7 +52,7 @@ def main():
     # Create window
     window = webview.create_window(
         title="Paper Clone",
-        url="http://localhost:5173",
+        url="http://localhost:5175",
         width=1400,
         height=900,
         min_size=(800, 600),

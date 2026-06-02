@@ -1,22 +1,22 @@
-我的遇到的问题，我在使用paper mcp来进行设计，但是这个paper的Server需要链接国外网络经常不稳定，这个设计软件是基于HTML，提供mcp然后让Claude code可以调用mcp去生成HTML;
+The problem I ran into is that I use Paper MCP for design, but the Paper server needs an overseas network connection, which is often unstable. This design tool is based on HTML and exposes MCP so Claude Code can call it to generate HTML;
 
-它的界面也非常简单，就是左边有几个TOOL icon：mouse,hand,frame, rectangle, text, sharders(这个先不管) mouse和hand是用来在界面上快速改变viewport和拖拽artbaord位置的，frame,reactangle, text本质就是HTML元素;
+The interface is very simple: on the left there are several tool icons: mouse, hand, frame, rectangle, text, shaders (ignore that for now). Mouse and hand are used to quickly change the viewport and drag artboards around. Frame, rectangle, and text are essentially HTML elements;
 
-我想要做什么？ 我想要自己造一个paper这样的基于MCP的设计工具，后端用fastapi, 前端用vite + react实现，最后再用pywebview打包, 最后我就能够有一个自己的paper这样的UI设计软件了；
+What do I want to do? I want to build a Paper-like MCP-based design tool myself, with a FastAPI backend and a Vite + React frontend, then package it with pywebview so I end up with my own Paper-like UI design application;
 
-当前你有什么工具：1. paper mcp你可以通过和这个接口通信和交互了解他是怎么Work的，就能逆向工程；2.browseros的MCP，它可以用来控制浏览器，你还可以通过它的截图工具来截图，3.minimax MCP它提供了web搜索和image tool来解析图片内容，你通过browseros截图然后调用图片理解，就可以知道你开发的前端页面有什么问题，这样你就可以在不需要我人工介入的情况下，持续编写代码-》浏览器运行-》截图查看——》找到问题-》修改代码，这样持续循环的跑，直到必须要我介入或者得到阶段性成果时才停下来等待指令；
+The tools you currently have are: 1. Paper MCP, which you can inspect by communicating with the interface and learning how it works, then reverse engineer it; 2. BrowserOS MCP, which can control the browser and also take screenshots; 3. Minimax MCP, which provides web search and an image tool for understanding images. You can use BrowserOS screenshots and then call the image understanding tool to figure out what is wrong with the frontend you are building. That way you can keep writing code, running the browser, taking screenshots, finding problems, and fixing code without needing my intervention, until it is necessary for me to step in or until you have a meaningful checkpoint to report;
 
-关于项目代码，你可以参考我的这个项目：/Users/teli/www/work/MinimaxApp 里面是之前我怎么用开发的；
-后端Server端口建议默认用3004，防止我我的其他开发中的项目冲突；
+For project code, you can refer to this project: /Users/teli/www/work/MinimaxApp. It shows how I built things before;
+The backend server should default to port 3004 to avoid conflicts with my other active projects;
 
-好了接下来，你来问我问题，一个一个来不要一次性全部列出来，目的是澄清我的需求模糊的地方，我们交流完成的差不多了，你写下开发plan.md 用于追踪项目进度和目标；
+Next, ask me questions one at a time instead of listing them all at once. The goal is to clarify the vague parts of my requirements. Once we have clarified enough, write a development plan.md to track project progress and goals;
 
 -------------------------
-1.整体最顶层的layout其实是4个column, 而你是3个column，tool bar是一个column而你是悬浮在最左边的，其二，的toolbar应尽量复用它的原来的图标，你直接复制它的svg代码不就好了？
+1. The top-level layout should actually have 4 columns. Your version has 3. The toolbar should be its own column instead of floating on the far left. Also, the toolbar should reuse the original icons as much as possible. You can copy the SVG code directly.
 
-2.第一个column的层级关系你也写的不够，不应该叫div element而paper是frame或者rectangle，
+2. The hierarchy of the first column is not specific enough. It should not be called "div element"; in Paper it is a frame or rectangle.
 
-3.现在canvas还不能用快捷键移动，按住空格，拖拽来移动，cmd + plus来放大，cmd + - 来缩小；还没有鼠标右键功能，目前它的鼠标右键的菜单是这样的：
+3. The canvas does not yet support keyboard-assisted movement. Hold Space and drag to move, use Cmd + plus to zoom in, and Cmd + - to zoom out. There is also no right-click menu yet. The current context menu should look like this:
 Copy ⌘C
 Copy link 
 Copy as 
@@ -32,8 +32,9 @@ Paste styles ⌥⌘V
 Frame selection ⇧F
 Add flex layout ⇧A
 Ungroup ⇧⌘G
-Show / hide ⇧⌘
-HLock / unlock ⇧⌘L
-ArrangeSelect parent  Escape
+Show / hide ⇧⌘H
+Lock / unlock ⇧⌘L
+Arrange
+Select parent  Escape
 Select children Enter
 

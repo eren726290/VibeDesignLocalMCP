@@ -170,6 +170,7 @@ def parse_html_elements(html: str) -> list[dict]:
     elements = []
     # Map from Python id(Tag) → our element id
     bs_to_el_id = {}
+    el_by_id = {}
     # Track whether this is the outermost element (first in document order)
     is_first = True
 
@@ -218,8 +219,11 @@ def parse_html_elements(html: str) -> list[dict]:
         }
         if parent_id:
             el["parentId"] = parent_id
+        if parent_id and parent_id in el_by_id:
+            el_by_id[parent_id]["children"].append(el_id)
 
         elements.append(el)
         bs_to_el_id[id(tag)] = el_id
+        el_by_id[el_id] = el
 
     return elements
