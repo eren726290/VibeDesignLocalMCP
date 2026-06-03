@@ -35,6 +35,8 @@ The priority was not full Paper UI parity. The priority was to make the MCP/docu
 - `get_screenshot` now returns honest stored screenshot metadata and clear missing-screenshot errors.
 - `duplicate_nodes` now duplicates full subtrees and returns `descendantIdMap`.
 - `move_nodes` supports same-page reorder and reparent operations while preserving subtrees.
+- `rename_nodes` now renames both element nodes and page/artboard nodes with page-aware targeting.
+- Element names now round-trip through `export_html`, `save_document`, `open_document`, `get_html`, and `get_page_html`.
 
 ## Fine-Tuned Features
 
@@ -62,6 +64,8 @@ The priority was not full Paper UI parity. The priority was to make the MCP/docu
 - Screenshot readback no longer pretends to capture pixels when none were posted by the frontend.
 - Page-root duplicated nodes omit `parentId`, matching the existing root-node convention.
 - `move_nodes` rejects cross-page moves and cycle moves without mutation.
+- `delete_nodes` now removes whole subtrees and cleans remaining references.
+- Element names now serialize as `data-paper-name` and parse back from saved HTML.
 
 ## Agent-First Workflow Now Supported
 
@@ -82,8 +86,6 @@ This is the core loop to test on PC.
 - `export_pdf` is intentionally postponed. It needs browser/PDF dependencies and cross-platform testing.
 - Image export / PNG export is not implemented yet.
 - `get_jsx` still needs a correctness pass.
-- `rename_nodes` response still needs refinement.
-- `delete_nodes` still needs stronger subtree-aware deletion.
 - Visibility/lock behavior is not fully implemented.
 - Undo/redo for MCP mutations is not implemented.
 - Duplicate MCP backend paths still exist and need consolidation later:
@@ -104,6 +106,7 @@ This is the core loop to test on PC.
 8. Duplicate a card/section/chart with `duplicate_nodes` and edit cloned descendants using `descendantIdMap`.
 9. Move/reparent nodes with `move_nodes`.
 10. Export with `export_html` and inspect the saved output.
+11. Rename elements/pages, then save and reopen to confirm names survive round-trip.
 
 ## Recommended Next Tasks After PC Testing
 

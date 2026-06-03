@@ -850,6 +850,179 @@ class DocumentStore:
             "errors": errors,
         }
 
+    def delete_subtrees(self, doc_id: str, node_ids, page_id=None) -> dict:
+        """Delete full element subtrees and clean all parent/children references.
+
+        - Deletes requested nodes plus all of their descendants in one pass.
+        - Removes deleted IDs from any remaining `children` arrays (defensive).
+        - Removes `parentId` from any remaining element whose parent was deleted.
+        - If a requested node is a descendant of another requested node, the
+          ancestor's subtree deletion covers it (no duplicate work, no error).
+        - Optional `page_id` constrains the search/delete to one page.
+        - Cross-page deletes without `pageId` are allowed: each valid source is
+          deleted on its own page within the same batch.
+        - Pages/artboards are never deleted here; use `delete_page` for that.
+
+        Args:
+            doc_id: Document identifier.
+            node_ids: List of element node IDs to delete. Non-empty list of strings.
+            page_id: Optional page ID. If provided, validates first and constrains
+                the search to that page.
+
+        Returns:
+            {
+              "success": bool,
+              "deleted": [str],            # flattened list of all deleted IDs
+              "deletedCount": int,
+              "deletedRoots": [str],       # input order, deduped, ancestor-filtered
+              "deletedByRoot": {root: [ids in subtree, root first]},
+              "errors": [{nodeId, error}]
+            }
+        """
+        if not isinstance(node_ids, list) or not node_ids:
+            return {"success": False, "deleted": [], "deletedCount": 0,
+                    "deletedRoots": [], "deletedByRoot": {},
+                    "errors": [{"error": "nodeIds must be a non-empty list"}]}
+
+        doc = self.documents.get(doc_id)
+        if not doc:
+            return {"success": False, "deleted": [], "deletedCount": 0,
+                    "deletedRoots": [], "deletedByRoot": {},
+                    "errors": [{"error": "Document not found"}]}
+
+        # Validate pageId first if provided
+        if page_id is not None and page_id != "":
+            page_by_id = {p.id: p for p in doc.pages}
+            if page_id not in page_by_id:
+                return {"success": False, "deleted": [], "deletedCount": 0,
+                        "deletedRoots": [], "deletedByRoot": {},
+                        "errors": [{"error": f"Page '{page_id}' not found"}]}
+
+        # Build lookups
+        page_by_id = {p.id: p for p in doc.pages}
+
+        # Collect valid sources + errors as (el, page) tuples to support same-ID-different-page
+        valid_sources = []  # list of (element_dict, page) tuples
+        errors = []
+        seen = set()
+        for nid in node_ids:
+            if not isinstance(nid, str) or not nid:
+                errors.append({"nodeId": nid, "error": "nodeId must be a non-empty string"})
+                continue
+            if nid in seen:
+                continue  # silent dedup
+            seen.add(nid)
+            # Reject page IDs as source
+            if nid in page_by_id:
+                errors.append({"nodeId": nid, "error": f"Node '{nid}' is a page; only elements can be deleted"})
+                continue
+
+            el = None
+            found_page = None
+            if page_id:
+                # Search only on the specified page
+                target_page = page_by_id.get(page_id)
+                if target_page:
+                    for e in target_page.elements:
+                        if e.get("id") == nid:
+                            el = e
+                            found_page = target_page
+                            break
+                if el is None:
+                    errors.append({"nodeId": nid, "error": f"Node '{nid}' not found on page '{page_id}'"})
+                    continue
+            else:
+                # First match across all pages
+                for page in doc.pages:
+                    for e in page.elements:
+                        if e.get("id") == nid:
+                            el = e
+                            found_page = page
+                            break
+                    if el is not None:
+                        break
+                if el is None:
+                    errors.append({"nodeId": nid, "error": f"Node '{nid}' not found"})
+                    continue
+            valid_sources.append((el, found_page))
+
+        if not valid_sources:
+            return {"success": False, "deleted": [], "deletedCount": 0,
+                    "deletedRoots": [], "deletedByRoot": {},
+                    "errors": errors}
+
+        # Filter ancestor + descendant (silent), scoped per page
+        top_level = []
+        for el, page in valid_sources:
+            eid = el.get("id")
+            elements_by_id = {e.get("id"): e for e in page.elements if e.get("id")}
+            is_descendant = False
+            for other_el, other_page in valid_sources:
+                if other_el is el:
+                    continue
+                if other_page is not page:
+                    continue
+                descendants = self._collect_descendant_ids(elements_by_id, other_el.get("id"))
+                if eid in descendants:
+                    is_descendant = True
+                    break
+            if not is_descendant:
+                top_level.append((el, page))
+
+        if not top_level:
+            return {"success": False, "deleted": [], "deletedCount": 0,
+                    "deletedRoots": [], "deletedByRoot": {},
+                    "errors": errors}
+
+        # Collect subtrees per root and per affected page.
+        deleted_by_root = {}
+        deleted_by_page = {}
+        for el, page in top_level:
+            eid = el.get("id")
+            elements_by_id = {e.get("id"): e for e in page.elements if e.get("id")}
+            descendants = self._collect_subtree_ids_ordered(elements_by_id, eid)
+            subtree_ids = [eid] + descendants
+            deleted_by_root[eid] = subtree_ids
+            deleted_by_page.setdefault(page.id, set()).update(subtree_ids)
+
+        # Determine affected pages (one per top-level source)
+        affected_pages = {}
+        for _, page in top_level:
+            affected_pages[page.id] = page
+
+        # Per affected page: clean elements, children arrays, parentId
+        for page in affected_pages.values():
+            deleted_ids = deleted_by_page.get(page.id, set())
+            # Remove deleted elements from page.elements
+            page.elements = [el for el in page.elements
+                             if el.get("id") not in deleted_ids]
+            # Defensive cleanup of remaining elements
+            for el in page.elements:
+                # Clean children array
+                if "children" in el and el["children"]:
+                    el["children"] = [cid for cid in el["children"]
+                                      if cid not in deleted_ids]
+                # Clean parentId if it points to a deleted ID
+                if el.get("parentId") in deleted_ids:
+                    el.pop("parentId", None)
+
+        self._save(doc_id)
+
+        # Build response
+        deleted_flat = []
+        for el, _ in top_level:
+            deleted_flat.extend(deleted_by_root[el.get("id")])
+        deleted_roots = [el.get("id") for el, _ in top_level]
+
+        return {
+            "success": True,
+            "deleted": deleted_flat,
+            "deletedCount": len(deleted_flat),
+            "deletedRoots": deleted_roots,
+            "deletedByRoot": deleted_by_root,
+            "errors": errors,
+        }
+
     def write_html(self, doc_id: str, html: str, mode: str = "append",
                    target_node_id: str = None, page_id: str = None) -> dict:
         """Write HTML into a document with targeted mode support."""
@@ -1157,7 +1330,8 @@ class DocumentStore:
         tag = el.get("tag", "div")
         text = html.escape(el.get("text", "") or "")
         style_attr = self._style_to_attr(el.get("style", {}))
-        attrs = f'data-paper-node="{html.escape(el_id)}"'
+        el_name = el.get("name", "")
+        attrs = f'data-paper-node="{html.escape(el_id)}" data-paper-name="{html.escape(el_name, quote=True)}"'
 
         children_html = ""
         for child_id in el.get("children", []):
@@ -1391,9 +1565,12 @@ class DocumentStore:
 
         el_type = self._infer_type(tag_name, style, text or "")
 
+        parsed_name = tag.get("data-paper-name")
+        el_name = parsed_name if parsed_name else f"{tag_name.capitalize()} Element"
+
         el = {
             "id": el_id,
-            "name": f"{tag_name.capitalize()} Element",
+            "name": el_name,
             "tag": tag_name,
             "type": el_type,
             "style": style,

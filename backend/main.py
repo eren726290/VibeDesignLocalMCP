@@ -840,17 +840,172 @@ async def _set_text_content(doc_id: str, args: dict) -> dict:
 
 
 async def _rename_nodes(doc_id: str, args: dict) -> dict:
-    node_ids = args.get("nodeIds", [])
-    names = args.get("names", {})
+    """Rename element nodes and page/artboard nodes.
+
+    - Renames element nodes (updates ``el["name"]``) and page/artboard nodes
+      (updates ``Page.name``). Other fields (id, children, style, text, tag,
+      type, size, position, current page, etc.) are preserved.
+    - Optional ``pageId`` constrains the lookup to one page: when provided,
+      a nodeId equal to ``pageId`` renames the page itself; any other nodeId
+      is searched only within that page's elements.
+    - When ``pageId`` is omitted, page IDs win over element IDs (a nodeId that
+      matches any page is treated as a page rename; otherwise the first
+      matching element across all pages is renamed).
+    - Missing or invalid names for a requested node produce an error entry
+      and do not rename that node; other valid renames still proceed.
+    - Save is called once at the end if any rename succeeded.
+
+    Input:
+        ``nodeIds`` (list[str], required, non-empty)
+        ``names`` (dict[nodeId -> str], required, non-empty; each value must
+            be a non-blank string — checked via ``str.strip()``)
+        ``pageId`` (str, optional)
+
+    Response:
+        ``success``: True if at least one rename succeeded, else False
+        ``renamed``: list of {nodeId, pageId, kind, oldName, newName, node}
+        ``renamedCount``: int
+        ``errors``: list of {nodeId, error}
+    """
     if not doc_id:
         doc_id = "default"
-    updated = []
-    for node_id in node_ids:
-        name = names.get(node_id, "Element")
-        result = doc_store.update_element(doc_id, node_id, {"name": name})
-        if result.get("success"):
-            updated.append(result["element"])
-    return {"success": True, "updated": updated}
+
+    # 1. validate nodeIds
+    node_ids = args.get("nodeIds")
+    if not isinstance(node_ids, list) or not node_ids:
+        return {"success": False, "renamed": [], "renamedCount": 0,
+                "errors": [{"error": "nodeIds must be a non-empty list"}]}
+
+    # 2. validate names
+    names = args.get("names")
+    if not isinstance(names, dict) or not names:
+        return {"success": False, "renamed": [], "renamedCount": 0,
+                "errors": [{"error": "names must be a non-empty object"}]}
+
+    # 3. resolve document
+    doc = doc_store.documents.get(doc_id)
+    if not doc:
+        return {"success": False, "renamed": [], "renamedCount": 0,
+                "errors": [{"error": "Document not found"}]}
+
+    # 4. validate pageId first if provided
+    page_id = args.get("pageId") or None
+    if page_id is not None:
+        page_by_id = {p.id: p for p in doc.pages}
+        if page_id not in page_by_id:
+            return {"success": False, "renamed": [], "renamedCount": 0,
+                    "errors": [{"error": f"Page '{page_id}' not found"}]}
+
+    # 5. process each deduped node ID
+    renamed = []
+    errors = []
+    seen = set()
+    for nid in node_ids:
+        if not isinstance(nid, str) or not nid:
+            errors.append({"nodeId": nid, "error": "nodeId must be a non-empty string"})
+            continue
+        if nid in seen:
+            continue  # silent dedup
+        seen.add(nid)
+
+        # name presence + validity
+        if nid not in names:
+            errors.append({"nodeId": nid, "error": f"Missing name for node '{nid}'"})
+            continue
+        new_name = names[nid]
+        if not (isinstance(new_name, str) and new_name.strip() != ""):
+            errors.append({"nodeId": nid,
+                           "error": f"Invalid name for node '{nid}': must be a non-empty string"})
+            continue
+
+        # Lookup per spec priority
+        page_obj = None  # the page object, when found
+        el_obj = None    # the element dict, when found
+        kind = None
+
+        if page_id is not None:
+            target_page = page_by_id[page_id]
+            if nid == page_id:
+                page_obj = target_page
+                kind = "page"
+            else:
+                for e in target_page.elements:
+                    if e.get("id") == nid:
+                        el_obj = e
+                        page_obj = target_page
+                        kind = "element"
+                        break
+                if el_obj is None:
+                    errors.append({"nodeId": nid,
+                                   "error": f"Node '{nid}' not found on page '{page_id}'"})
+                    continue
+        else:
+            # page ID match first
+            matched_page = None
+            for p in doc.pages:
+                if p.id == nid:
+                    matched_page = p
+                    break
+            if matched_page is not None:
+                page_obj = matched_page
+                kind = "page"
+            else:
+                # first element match across all pages
+                for p in doc.pages:
+                    for e in p.elements:
+                        if e.get("id") == nid:
+                            el_obj = e
+                            page_obj = p
+                            kind = "element"
+                            break
+                    if el_obj is not None:
+                        break
+                if el_obj is None:
+                    errors.append({"nodeId": nid, "error": f"Node '{nid}' not found"})
+                    continue
+
+        # Mutate + record
+        if kind == "page":
+            old_name = page_obj.name
+            page_obj.name = new_name
+            renamed.append({
+                "nodeId": page_obj.id,
+                "pageId": page_obj.id,
+                "kind": "page",
+                "oldName": old_name,
+                "newName": new_name,
+                "node": {
+                    "id": page_obj.id,
+                    "name": page_obj.name,
+                    "x": page_obj.x,
+                    "y": page_obj.y,
+                    "width": page_obj.width,
+                    "height": page_obj.height,
+                    "backgroundColor": page_obj.backgroundColor,
+                    "elements": page_obj.elements,
+                },
+            })
+        else:
+            old_name = el_obj.get("name", "")
+            el_obj["name"] = new_name
+            renamed.append({
+                "nodeId": el_obj.get("id"),
+                "pageId": page_obj.id,
+                "kind": "element",
+                "oldName": old_name,
+                "newName": new_name,
+                "node": el_obj,
+            })
+
+    if renamed:
+        doc_store._save(doc_id)
+
+    return {
+        "success": len(renamed) > 0,
+        "renamed": renamed,
+        "renamedCount": len(renamed),
+        "errors": errors,
+    }
 
 
 async def _get_computed_styles(doc_id: str, args: dict) -> dict:
@@ -935,16 +1090,12 @@ def _delete_artboard(doc_id: str, args: dict) -> dict:
 
 
 async def _delete_nodes(doc_id: str, args: dict) -> dict:
-    """Delete elements by their IDs"""
-    node_ids = args.get("nodeIds", [])
+    """Delete element subtrees; cleans parent/children references defensively."""
     if not doc_id:
         doc_id = "default"
-    deleted = []
-    for node_id in node_ids:
-        result = doc_store.delete_element(doc_id, node_id)
-        if result.get("success"):
-            deleted.append(node_id)
-    return {"success": True, "deleted": deleted}
+    node_ids = args.get("nodeIds", [])
+    page_id = args.get("pageId") or None
+    return doc_store.delete_subtrees(doc_id, node_ids, page_id)
 
 
 async def _move_nodes(doc_id: str, args: dict) -> dict:
@@ -1481,7 +1632,7 @@ TOOLS_LIST = [
     {"name": "duplicate_nodes", "description": "Duplicate full element subtrees and return per-root descendant ID maps.", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}, "description": "Element node IDs to duplicate. Required, non-empty."}, "offsetX": {"type": "number", "description": "Horizontal offset applied to cloned root's positional style. Default 20."}, "offsetY": {"type": "number", "description": "Vertical offset applied to cloned root's positional style. Default 20."}}, "required": ["nodeIds"]}},
     {"name": "update_styles", "description": "Update styles", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}, "styles": {"type": "object"}}, "required": ["nodeIds", "styles"]}},
     {"name": "set_text_content", "description": "Set text content", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}, "text": {"type": "string"}}, "required": ["nodeIds", "text"]}},
-    {"name": "rename_nodes", "description": "Rename nodes", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}, "names": {"type": "object"}}, "required": ["nodeIds", "names"]}},
+    {"name": "rename_nodes", "description": "Rename element nodes and page/artboard nodes. Returns per-node results with oldName/newName/kind/pageId/node. Supports an optional pageId constraint to scope the lookup to a single page (or rename that page itself when a nodeId equals pageId).", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}, "description": "Node IDs to rename (elements and/or page IDs). Required, non-empty."}, "names": {"type": "object", "description": "Map of nodeId -> new name. Every requested ID must have a non-empty string entry (whitespace-only is invalid)."}, "pageId": {"type": "string", "description": "Optional page ID. If provided, validates first and scopes the lookup to that page; if a nodeId equals pageId, that page is renamed."}}, "required": ["nodeIds", "names"]}},
     {"name": "finish_working_on_nodes", "description": "Mark work finished", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "get_computed_styles", "description": "Get computed styles", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}}}},
     {"name": "get_jsx", "description": "Export as JSX", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}}}},
@@ -1493,7 +1644,7 @@ TOOLS_LIST = [
     {"name": "get_html", "description": "Get clean exported HTML for the current page, a page, or an element subtree.", "inputSchema": {"type": "object", "properties": {"nodeId": {"type": "string", "description": "Optional. Page or element ID. Omit to use current page."}, "pageId": {"type": "string", "description": "Optional. Target page ID."}, "pretty": {"type": "boolean", "description": "Pretty-print the HTML. Default true."}}}},
     {"name": "create_artboard", "description": "Create a new artboard/page", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Optional page ID (e.g. 'hero-section'). Auto-generated if omitted."}, "name": {"type": "string", "description": "Artboard name (e.g. 'Header', 'Hero Section', 'Mobile Home')"}, "width": {"type": "number", "description": "Width in pixels (e.g. 1440 for desktop, 375 for mobile)"}, "height": {"type": "number", "description": "Height in pixels (e.g. 900 for desktop hero, 812 for mobile)"}, "x": {"type": "number", "description": "X position on canvas. If omitted, auto-places to the right of existing artboards."}, "y": {"type": "number", "description": "Y position on canvas. If omitted, auto-places to the right of existing artboards."}}}},
     {"name": "delete_artboard", "description": "Delete an artboard/page", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Page ID to delete"}}, "required": ["pageId"]}},
-    {"name": "delete_nodes", "description": "Delete elements by their IDs", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}, "description": "Array of element IDs to delete"}}, "required": ["nodeIds"]}},
+    {"name": "delete_nodes", "description": "Delete element subtrees. Removes each requested node plus all of its descendants, cleans up parent/children references, and supports optional pageId constraint.", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}, "description": "Element node IDs to delete. Required, non-empty."}, "pageId": {"type": "string", "description": "Optional page ID. If provided, validates first and constrains deletion to that page."}}, "required": ["nodeIds"]}},
     {"name": "move_nodes", "description": "Move element nodes within the same page (reorder or reparent). Preserves whole subtrees. Same-page only — cross-page moves are rejected.", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}, "description": "Element node IDs to move. Required, non-empty."}, "targetParentId": {"type": "string", "description": "Target page ID or element ID. If omitted, pageId is used as the page-root target."}, "pageId": {"type": "string", "description": "Optional page ID. If provided, constrains targetParentId lookup to that page; otherwise targetParentId can be any page or element."}, "index": {"type": "number", "description": "Insertion index inside the target's children array (or page-root order). Omitted or invalid → append at end."}}, "required": ["nodeIds"]}},
     {"name": "update_artboard", "description": "Update artboard/page properties (position, size, name, background color)", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Page ID to update"}, "x": {"type": "number", "description": "X position on canvas (px)"}, "y": {"type": "number", "description": "Y position on canvas (px)"}, "width": {"type": "number", "description": "Width in pixels"}, "height": {"type": "number", "description": "Height in pixels"}, "name": {"type": "string", "description": "Artboard name"}, "backgroundColor": {"type": "string", "description": "Background color (hex, e.g. #ffffff)"}}, "required": ["pageId"]}},
     {"name": "get_layout_diagnostics", "description": "Report likely layout issues such as overlap, clipping, text overflow, off-artboard nodes, zero-size nodes, and missing dimensions.", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Optional page ID."}, "nodeId": {"type": "string", "description": "Optional page or element ID."}, "includeOverlaps": {"type": "boolean", "description": "Include sibling overlap checks. Default true."}, "includeText": {"type": "boolean", "description": "Include text overflow heuristic. Default true."}}}},

@@ -484,6 +484,110 @@ OpenCode does not write this file. Codex reviews completed work and records the 
   - The implementation intentionally rejects cross-page moves for this checkpoint.
   - Task 12 brings the project to the planned 50% checkpoint for agent-first backend workflow testing.
 
+### Task 13 Review - Make delete_nodes Subtree-Safe
+
+- Actor: Codex
+- Time: 2026-06-02T22:08:17Z
+- Summary: Reviewed OpenCode Task 13 implementation and made one reviewer fix.
+- Files reviewed:
+  - `backend/document.py`
+  - `backend/main.py`
+  - `backend/requirements.txt`
+  - `architecture.md`
+  - `to-do.md`
+  - `action-log.md`
+  - `checkpoint-report.md`
+- Files changed by OpenCode:
+  - `backend/document.py`
+  - `backend/main.py`
+- Files changed by Codex during review:
+  - `backend/document.py`
+  - `action-log.md`
+- Review result: accepted after minor fix.
+- OpenCode changes accepted:
+  - Added `DocumentStore.delete_subtrees()` for active MCP subtree deletion.
+  - Kept legacy `delete_element()` unchanged, so REST single-element delete behavior remains separate.
+  - Updated `_delete_nodes()` to call the subtree-safe batch method.
+  - Updated `delete_nodes` tool schema with optional `pageId`.
+  - Implemented partial success for missing nodes.
+  - Implemented ancestor + descendant deduplication.
+  - Cleaned remaining `children` arrays and `parentId` references after deletion.
+  - Supported cross-page delete batches when no `pageId` is provided.
+- Codex reviewer fix:
+  - Changed cleanup from one global deleted-ID set to per-page deleted-ID sets. Without this, a cross-page delete could remove or clean references to the same element ID on an affected page where that ID was not actually part of the requested deletion.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Focused independent delete tests passed for:
+    - leaf deletion
+    - parent subtree deletion
+    - page-root subtree deletion
+    - old parent child cleanup
+    - defensive child cleanup
+    - defensive `parentId` cleanup
+    - ancestor + descendant deduplication
+    - duplicate input ID deduplication
+    - missing-node partial failure
+    - page ID source rejection
+    - invalid `pageId` rejecting before mutation
+    - page-constrained lookup
+    - cross-page delete batches without `pageId`
+    - duplicate element IDs on different affected pages after reviewer fix
+- Notes:
+  - No dependencies were installed.
+  - Planner-owned files were not edited by OpenCode.
+  - `delete_nodes` is now aligned with subtree-aware duplicate and move behavior.
+
+### Task 14 Review - Fix rename_nodes Response And Targeting
+
+- Actor: Codex
+- Time: 2026-06-02T22:46:36Z
+- Summary: Reviewed OpenCode Task 14 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/main.py`
+  - `backend/document.py`
+  - `backend/parse_html.py`
+  - `backend/requirements.txt`
+  - `architecture.md`
+  - `to-do.md`
+  - `action-log.md`
+  - `checkpoint-report.md`
+- Files changed by OpenCode:
+  - `backend/main.py`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Replaced `_rename_nodes()` with a validated handler for element and page/artboard rename.
+  - Removed the old silent `"Element"` fallback for missing names.
+  - Added `pageId`-constrained lookup and page renaming support.
+  - Added per-node response entries with `nodeId`, `pageId`, `kind`, `oldName`, `newName`, and updated `node`.
+  - Added partial success behavior with per-node errors.
+  - Saved once after successful mutations.
+  - Updated the `rename_nodes` MCP schema.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Focused independent rename tests passed for:
+    - element rename
+    - page/artboard rename
+    - multi-node rename
+    - partial success with missing node
+    - missing name error
+    - empty/whitespace/non-string name error
+    - duplicate node ID deduplication
+    - invalid `pageId` rejecting before mutation
+    - page-constrained element lookup
+    - same element ID on another page not being renamed when `pageId` is provided
+    - page rename when `nodeId == pageId`
+    - response shape fields
+    - preservation of element style/text/tag/id/children
+    - preservation of page size/position/id/elements
+- Notes:
+  - No dependencies were installed.
+  - Planner-owned files were not edited by OpenCode.
+  - Element-name save/open round-trip remains a known pre-existing limitation because exported element HTML currently does not preserve element `name` metadata. Page-name round-trip is already supported through `data-paper-name`.
+
 ### Task 08 Review - Overflow Report
 
 - Actor: Codex
@@ -578,3 +682,38 @@ OpenCode does not write this file. Codex reviews completed work and records the 
     - read-only behavior preserving document elements
 - Notes:
   - Planner-owned files `architecture.md`, `to-do.md`, and `action-log.md` remain Codex-owned. OpenCode did not edit `architecture.md` or `to-do.md` for Task 09.
+
+### Task 15 Review - Preserve Element Names In Export/Open Round Trip
+
+- Actor: Codex
+- Time: 2026-06-03T00:00:00Z
+- Summary: Reviewed OpenCode Task 15 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/document.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/document.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - `_render_element()` now emits `data-paper-name` alongside `data-paper-node`.
+  - `_parse_element_tree()` now restores element names from `data-paper-name`.
+  - Missing or empty `data-paper-name` falls back to the existing readable `"{Tag} Element"` name.
+  - The fix propagates through `export_html`, `save_document`, `open_document`, `get_html`, `get_page_html`, and single-page export paths that use `_render_element()`.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Independent round-trip check passed for:
+    - escaped top-level element names in exported HTML
+    - escaped nested child names in exported HTML
+    - special characters including quotes, ampersand, angle brackets, and apostrophe
+    - `save_document` then `open_document` preserving top-level and nested element names
+    - page name round-trip remaining intact
+    - IDs, text, parentId, and children arrays preserved through the name round-trip
+    - `get_node_html` / `get_page_html` including `data-paper-name`
+    - legacy HTML without element `data-paper-name` using fallback names
+    - empty `data-paper-name=""` using fallback names
+- Notes:
+  - `backend/parse_html.py` was intentionally untouched; raw `write_html` input parsing remains separate from clean document save/open round-trip parsing.
