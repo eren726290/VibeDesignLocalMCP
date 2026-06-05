@@ -6,6 +6,69 @@ from bs4 import BeautifulSoup, Comment
 import uuid
 
 
+# Shared tag → element type mapping. Identical to DocumentStore._TYPE_MAP in
+# backend/document.py so that write_html and open_document produce the same
+# `type` for the same tag. Acceptable duplication for now; the two inference
+# functions live in separate round-trip paths and the repo has not consolidated
+# them yet.
+_TYPE_MAP = {
+    # Media / controls
+    "img": "image",
+    "video": "video",
+    "audio": "audio",
+    "canvas": "canvas",
+    "input": "input",
+    "textarea": "text",
+    "select": "select",
+    "button": "button",
+    "a": "link",
+    # Text / document
+    "span": "text",
+    "p": "text",
+    "em": "text",
+    "strong": "text",
+    "label": "text",
+    "figcaption": "text",
+    "h1": "heading", "h2": "heading", "h3": "heading",
+    "h4": "heading", "h5": "heading", "h6": "heading",
+    "ul": "list", "ol": "list", "li": "list-item",
+    "table": "table",
+    # SVG (lowercased by BeautifulSoup html.parser)
+    "svg": "svg",
+    "rect": "svg-rect",
+    "circle": "svg-circle",
+    "ellipse": "svg-ellipse",
+    "path": "svg-path",
+    "line": "svg-line",
+    "polyline": "svg-polyline",
+    "polygon": "svg-polygon",
+    "text": "svg-text",
+    "tspan": "svg-text",
+    "g": "svg-group",
+    "defs": "svg-defs",
+    "lineargradient": "svg-gradient",
+    "radialgradient": "svg-gradient",
+    "stop": "svg-stop",
+    "clippath": "svg-clip-path",
+    "mask": "svg-mask",
+    "pattern": "svg-pattern",
+    "use": "svg-use",
+    "image": "svg-image",
+    "symbol": "svg-symbol",
+    # Container / default
+    "div": "div",
+    "section": "div",
+    "article": "div",
+    "header": "div",
+    "footer": "div",
+    "main": "div",
+    "nav": "div",
+    "aside": "div",
+    "form": "div",
+    "figure": "div",
+}
+
+
 def _parse_style(style_str: str) -> dict:
     """Parse a CSS style string into a camelCase key→value dict (React-compatible)."""
     style = {}
@@ -93,51 +156,11 @@ def _collect_attrs(attrs: dict) -> dict:
 
 def _infer_type(tag: str, style: dict, text: str) -> str:
     """Infer element type from tag name, style, and text content."""
-    if tag == "img":
-        return "image"
-    if tag == "video":
-        return "video"
-    if tag == "audio":
-        return "audio"
-    if tag == "canvas":
-        return "canvas"
-    if tag == "input":
-        return "input"
-    if tag == "textarea":
-        return "text"
-    if tag == "select":
-        return "select"
-    if tag == "button":
-        return "button"
-    if tag == "a":
-        return "link"
-    if tag == "span":
-        return "text"
-    if tag == "p":
-        return "text"
-    if tag == "h1":
-        return "heading"
-    if tag == "h2":
-        return "heading"
-    if tag == "h3":
-        return "heading"
-    if tag == "h4":
-        return "heading"
-    if tag == "h5":
-        return "heading"
-    if tag == "h6":
-        return "heading"
-    if tag == "ul":
-        return "list"
-    if tag == "ol":
-        return "list"
-    if tag == "li":
-        return "list-item"
-    if tag == "table":
-        return "table"
-    if tag == "svg":
-        return "svg"
+    if tag in _TYPE_MAP:
+        return _TYPE_MAP[tag]
     if text:
+        return "text"
+    if style.get("fontSize"):
         return "text"
     return "div"
 

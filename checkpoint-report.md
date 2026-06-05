@@ -37,6 +37,8 @@ The priority was not full Paper UI parity. The priority was to make the MCP/docu
 - `move_nodes` supports same-page reorder and reparent operations while preserving subtrees.
 - `rename_nodes` now renames both element nodes and page/artboard nodes with page-aware targeting.
 - Element names now round-trip through `export_html`, `save_document`, `open_document`, `get_html`, and `get_page_html`.
+- `get_jsx` now returns nested JSX with valid React style object syntax and page/node targeting.
+- `update_styles` now supports explicit `removeStyleKeys` for safe removal of stale style keys such as `left` and `top`.
 
 ## Fine-Tuned Features
 
@@ -45,6 +47,8 @@ The priority was not full Paper UI parity. The priority was to make the MCP/docu
 - `get_children` now returns real direct children for pages, elements, and SVG nodes.
 - `export_html` now preserves nested content, SVG children, text, escaped HTML, and page isolation.
 - `save_document` / `open_document` now round-trip exported VibeDesign HTML with page metadata, nested elements, styles, text, and SVG.
+- Element `type` inference is now stable between `write_html` and `open_document`, including links, headings, containers, and SVG primitives.
+- `update_styles` now patches style dictionaries instead of replacing them wholesale.
 - `desktop/main.py` now points to frontend port `5175`.
 - Main docs were translated to English for easier testing and maintenance.
 
@@ -66,6 +70,8 @@ The priority was not full Paper UI parity. The priority was to make the MCP/docu
 - `move_nodes` rejects cross-page moves and cycle moves without mutation.
 - `delete_nodes` now removes whole subtrees and cleans remaining references.
 - Element names now serialize as `data-paper-name` and parse back from saved HTML.
+- SVG primitives now get stable SVG-specific types such as `svg-rect`, `svg-path`, and `svg-text`.
+- Style repair can now merge new style values and explicitly remove old keys without losing unrelated visual styles.
 
 ## Agent-First Workflow Now Supported
 
@@ -75,8 +81,8 @@ create_artboard
 -> get_tree_summary / get_node_info / get_children
 -> get_html / get_page_html
 -> get_layout_diagnostics / get_overflow_report / get_svg_summary
--> duplicate_nodes / move_nodes / targeted write_html patch
--> export_html
+-> duplicate_nodes / move_nodes / update_styles / targeted write_html patch
+-> get_jsx / export_html
 ```
 
 This is the core loop to test on PC.
@@ -85,7 +91,6 @@ This is the core loop to test on PC.
 
 - `export_pdf` is intentionally postponed. It needs browser/PDF dependencies and cross-platform testing.
 - Image export / PNG export is not implemented yet.
-- `get_jsx` still needs a correctness pass.
 - Visibility/lock behavior is not fully implemented.
 - Undo/redo for MCP mutations is not implemented.
 - Duplicate MCP backend paths still exist and need consolidation later:
@@ -107,13 +112,12 @@ This is the core loop to test on PC.
 9. Move/reparent nodes with `move_nodes`.
 10. Export with `export_html` and inspect the saved output.
 11. Rename elements/pages, then save and reopen to confirm names survive round-trip.
+12. Misplace an element, then repair it with `update_styles` plus `removeStyleKeys` and `move_nodes`.
+13. Use `get_jsx` to verify nested JSX, style syntax, and SVG child output.
 
 ## Recommended Next Tasks After PC Testing
 
 - Fix any PC/cross-platform issues found during testing.
 - Add a small regression test suite for parser/document/export/MCP flows.
-- Strengthen `delete_nodes` for subtree deletion.
-- Fix `rename_nodes` response shape.
-- Fix `get_jsx`.
 - Add image export.
 - Add PDF export near the end, after browser dependency strategy is clear.

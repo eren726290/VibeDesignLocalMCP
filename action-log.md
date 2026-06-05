@@ -717,3 +717,164 @@ OpenCode does not write this file. Codex reviews completed work and records the 
     - empty `data-paper-name=""` using fallback names
 - Notes:
   - `backend/parse_html.py` was intentionally untouched; raw `write_html` input parsing remains separate from clean document save/open round-trip parsing.
+
+### Task 16 Review - Make Style Updates Non-Destructive
+
+- Actor: Codex
+- Time: 2026-06-04T00:00:00Z
+- Summary: Reviewed OpenCode Task 16 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/document.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/document.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - `DocumentStore.update_element()` now merges `updates["style"]` into the existing style dict when `updates["style"]` is a dict.
+  - Non-style updates keep the previous shallow-merge behavior.
+  - Non-dict style updates keep existing compatibility behavior.
+  - The active `update_styles` MCP path now patches style keys without wiping unrelated visual style.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Independent checks passed for:
+    - direct `update_element()` preserving unrelated style keys while patching `position`
+    - direct `update_element()` patching `left` and `top` while preserving `padding`, `borderRadius`, typography, color, and SVG-style attributes
+    - element fields `id`, `name`, `tag`, `type`, `text`, `children`, and `parentId` surviving style patches
+    - style creation when the element has no style
+    - style replacement when the existing style is not a dict
+    - compatibility behavior for `{"style": None}`
+    - active MCP `_update_styles()` preserving unrelated style keys
+    - `move_nodes()` still working after style patch
+    - `export_html` including preserved style keys
+    - `save_document` / `open_document` preserving the merged style
+- Notes:
+  - This fixes the core edit primitive used by MCP; no new MCP tool was needed for this task.
+
+### Task 17 Review - Stabilize Element Type Inference
+
+- Actor: Codex
+- Time: 2026-06-04T00:00:00Z
+- Summary: Reviewed OpenCode Task 17 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/parse_html.py`
+  - `backend/document.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/parse_html.py`
+  - `backend/document.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Added a module-level `_TYPE_MAP` in `backend/parse_html.py`.
+  - Added an identical class-level `DocumentStore._TYPE_MAP` in `backend/document.py`.
+  - Replaced both `_infer_type()` implementations with the same mapping plus fallback chain.
+  - Stabilized SVG primitive, link, heading, and common container types across `write_html` and `open_document`.
+  - Removed the `rectangle` inference fallback from `DocumentStore._infer_type()`.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Independent checks passed for:
+    - identical type maps in `parse_html.py` and `DocumentStore`
+    - SVG primitives and structural SVG tags mapping to `svg-*` types
+    - `a` preserving `link`
+    - headings preserving `heading`
+    - common containers preserving `div`
+    - fallback behavior returning `text` for text/font-size cases and `div` otherwise
+    - `parse_html_elements()` assigning the stabilized types
+    - `save_document` / `open_document` preserving stabilized types
+    - element IDs, names, tags, styles, text, parentId, and children arrays preserved through round-trip
+    - `export_html` still including SVG children
+- Notes:
+  - `get_svg_summary` was intentionally untouched because it already uses `tag` as the source of truth.
+
+### Task 18 Review - Fix get_jsx Nested Output
+
+- Actor: Codex
+- Time: 2026-06-05T00:00:00Z
+- Summary: Reviewed OpenCode Task 18 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Replaced flat `get_jsx` output with recursive tree rendering.
+  - Added `pageId`, `nodeId`, and `nodeIds` targeting for the active MCP handler.
+  - Added valid JSX style object rendering with JSON-escaped string values.
+  - Added JSX-safe text escaping and `data-paper-node` / `data-paper-name` expression attributes.
+  - Preserved SVG tags and child nesting in JSX output.
+  - Updated the active `TOOLS_LIST` schema for `get_jsx`.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Independent checks passed for:
+    - default current-page JSX export
+    - `pageId`, page `nodeId`, element `nodeId`, and `nodeIds` targeting
+    - `pageId`-constrained node lookup
+    - invalid page/node errors
+    - rejecting simultaneous `nodeId` and `nodeIds`
+    - empty `nodeIds` falling back to current page
+    - nested HTML and SVG structure preservation
+    - ancestor/descendant `nodeIds` dedup
+    - valid style object syntax using colons, not JSX attribute syntax inside style
+    - quoted non-identifier style keys
+    - JSON-escaped style string values
+    - JSX-safe text escaping for `<`, `>`, `&`, `{`, and `}`
+    - `data-paper-node` and `data-paper-name` expression attributes
+    - self-closing output for empty leaf nodes
+    - read-only behavior preserving document state
+- Notes:
+  - Duplicate MCP paths in `backend/handlers/mcp_handler.py` and `backend/mcp_server.py` remain intentionally untouched.
+
+### Task 19 Review - Add Explicit Style Key Removal
+
+- Actor: Codex
+- Time: 2026-06-05T00:00:00Z
+- Summary: Reviewed OpenCode Task 19 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/document.py`
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/document.py`
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Added internal `removeStyleKeys` support to `DocumentStore.update_element()`.
+  - Preserved Task 16 style merging, then removed requested keys from the resulting style dict.
+  - Stripped `removeStyleKeys` so it is never stored on elements.
+  - Added strict active MCP validation for `removeStyleKeys`.
+  - Kept `removeStyleKeys` out of artboard/page updates.
+  - Updated the active `update_styles` schema.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Independent checks passed for:
+    - direct style merge then key removal
+    - removal-only direct updates
+    - missing-style and non-dict-style edge cases not crashing
+    - `removeStyleKeys` not being stored on the element
+    - unrelated style keys and non-style fields preserved
+    - active `_update_styles()` accepting valid `removeStyleKeys`
+    - active `_update_styles()` rejecting invalid `removeStyleKeys`
+    - page/artboard updates still working and not receiving removal keys
+    - `get_node_info` and `get_computed_styles` reflecting removed keys
+    - element-level `export_html` output omitting removed keys and preserving unrelated style
+    - `get_jsx` omitting removed keys and preserving unrelated style
+    - `save_document` / `open_document` preserving the removed-key state
+    - `move_nodes` still working after style-key removal
+- Notes:
+  - Whole-document `export_html` still legitimately includes `left` and `top` on page wrapper styles. The review checked the target element style specifically.

@@ -4,11 +4,17 @@ Combines document API and MCP protocol in a single FastAPI application.
 """
 import uvicorn
 import json
+import re
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+# Matches valid JavaScript identifier names: starts with letter, _ or $,
+# followed by letters, digits, _, or $. Used to decide whether a style key
+# can be emitted bare in a JSX object literal or must be double-quoted.
+_JSX_IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
 # Document Store
 from document import DocumentStore, Page, Document
@@ -796,6 +802,19 @@ async def _duplicate_nodes(doc_id: str, args: dict) -> dict:
 async def _update_styles(doc_id: str, args: dict) -> dict:
     node_ids = args.get("nodeIds", [])
     styles = args.get("styles", {})
+    raw_remove = args.get("removeStyleKeys")
+
+    # Validate removeStyleKeys strictly: must be a list of non-empty strings
+    # when present. Omitted/None or empty list means no removal.
+    remove_style_keys = []
+    if raw_remove is not None:
+        if not isinstance(raw_remove, list):
+            return {"success": False, "error": "removeStyleKeys must be an array of non-empty strings"}
+        for k in raw_remove:
+            if not isinstance(k, str) or not k:
+                return {"success": False, "error": "removeStyleKeys must be an array of non-empty strings"}
+        remove_style_keys = list(raw_remove)
+
     if not doc_id:
         doc_id = "default"
 
@@ -813,13 +832,21 @@ async def _update_styles(doc_id: str, args: dict) -> dict:
         # Check if this is an artboard (page) ID
         is_artboard = any(p.id == node_id for p in doc.pages)
         if is_artboard and artboard_updates:
+            # Artboard path: never pass removeStyleKeys here (per spec).
             result = doc_store.update_page(doc_id, node_id, artboard_updates)
             if result.get("success"):
                 updated.append({"id": node_id, "type": "artboard", "updates": artboard_updates})
 
-        # Also apply CSS styles to elements (elements inside the artboard)
-        if css_styles:
-            result = doc_store.update_element(doc_id, node_id, {"style": css_styles})
+        # Element path: apply style update and/or removal. Removal is a no-op
+        # for artboard IDs (the element lookup will miss), which is the
+        # correct behavior per spec.
+        if css_styles or remove_style_keys:
+            payload = {}
+            if css_styles:
+                payload["style"] = css_styles
+            if remove_style_keys:
+                payload["removeStyleKeys"] = remove_style_keys
+            result = doc_store.update_element(doc_id, node_id, payload)
             if result.get("success"):
                 updated.append(result["element"])
 
@@ -1024,24 +1051,282 @@ async def _get_computed_styles(doc_id: str, args: dict) -> dict:
 
 
 async def _get_jsx(doc_id: str, args: dict) -> dict:
-    node_ids = args.get("nodeIds", [])
+    """Export the document (page, element, or subtrees) as a JSX component.
+
+    Targeting (all optional):
+      - no args             → current page
+      - pageId              → that page
+      - nodeId              → that page (if nodeId == pageId) or that element subtree
+      - nodeIds             → each requested element subtree; descendants of another
+                              requested node are dropped (ancestor kept), per-page
+      - pageId + nodeId     → page validated first, node lookup constrained to page
+      - pageId + nodeIds    → page validated first, every node lookup constrained to page
+
+    `nodeId` and `nodeIds` are mutually exclusive.
+    """
+    page_id = args.get("pageId") or None
+    node_id = args.get("nodeId") or None
+    raw_node_ids = args.get("nodeIds")
+    if raw_node_ids is None:
+        node_ids = None
+    else:
+        if not isinstance(raw_node_ids, list):
+            return {"success": False, "error": "nodeIds must be an array of node IDs"}
+        node_ids = raw_node_ids
+
+    if node_id and node_ids is not None:
+        return {"success": False, "error": "Cannot supply both nodeId and nodeIds"}
+
+    if not doc_id:
+        doc_id = "default"
     doc = doc_store.documents.get(doc_id) or doc_store.documents.get("default")
     if not doc:
-        return {"jsx": ""}
-    page = doc.pages[doc.current_page]
-    jsx_lines = ["function PaperCanvas() {", "  return ("]
-    for el in page.elements:
-        if not node_ids or el.get("id") in node_ids:
-            tag = el.get("tag", "div")
-            style = el.get("style", {})
-            text = el.get("text", "")
-            style_str = ", ".join(f'{k}="{v}"' for k, v in style.items())
-            if text:
-                jsx_lines.append(f'    <{tag} style={{{{ {style_str} }}}}>{text}</{tag}>')
-            else:
-                jsx_lines.append(f'    <{tag} style={{{{ {style_str} }}}} />')
-    jsx_lines.extend(["  );", "}"])
-    return {"jsx": "\n".join(jsx_lines)}
+        return {"success": False, "error": "Document not found"}
+    if not doc.pages:
+        return {"success": False, "error": "No pages"}
+
+    # Resolve to a list of render targets: (page, root_el_or_None_for_page_root, is_page_export)
+    # and determine response kind + identifying fields.
+    kind = "page"
+    response_node_id = None
+    response_node_ids = []
+
+    render_targets = []  # list of (page, root_el_or_None)
+
+    if node_ids is not None:
+        # Multi-node export: gather per page, dedup ancestor→descendant, render each
+        if not node_ids:
+            # Empty list = no constraint; fall back to current page
+            render_targets.append((doc.pages[doc.current_page], None))
+            primary_page = doc.pages[doc.current_page]
+            kind = "page"
+            response_node_ids = []
+        else:
+            per_page = {}  # page_id -> list of root el dicts
+            for nid in node_ids:
+                if page_id:
+                    page = next((p for p in doc.pages if p.id == page_id), None)
+                    if not page:
+                        return {"success": False, "error": f"Page '{page_id}' not found"}
+                    el = next((e for e in page.elements if e.get("id") == nid), None)
+                    if not el:
+                        return {"success": False, "error": f"Node '{nid}' not found on page '{page_id}'"}
+                else:
+                    found_page, found_el = _find_node_for_jsx(doc, nid)
+                    if found_page is None:
+                        return {"success": False, "error": f"Node '{nid}' not found"}
+                    page = found_page
+                    el = found_el
+                per_page.setdefault(page.id, {"page": page, "els": []})["els"].append(el)
+            # Per-page ancestor/descendant dedup: keep ancestors, drop descendants
+            for pid, group in per_page.items():
+                els = group["els"]
+                requested = {e["id"] for e in els}
+                keep = []
+                for e in els:
+                    is_descendant = False
+                    for other in els:
+                        if other["id"] == e["id"]:
+                            continue
+                        other_subtree = _collect_subtree_ids(group["page"], other["id"])
+                        if e["id"] in other_subtree:
+                            is_descendant = True
+                            break
+                    if not is_descendant:
+                        keep.append(e)
+                for e in keep:
+                    render_targets.append((group["page"], e))
+            primary_page = (
+                per_page[list(per_page.keys())[0]]["page"]
+                if per_page
+                else doc.pages[doc.current_page]
+            )
+            response_node_ids = list(node_ids)
+            kind = "nodes"
+    elif node_id:
+        target_page, target_el, err = _resolve_diagnostic_target(doc, page_id, node_id)
+        if err:
+            return err
+        # If target_el is None and nodeId matches a page, page-root export
+        if target_el is None and target_page.id == node_id:
+            render_targets.append((target_page, None))
+            kind = "page"
+        else:
+            render_targets.append((target_page, target_el))
+            response_node_id = target_el.get("id") if target_el else None
+            kind = "element"
+        primary_page = target_page
+    elif page_id:
+        target_page = next((p for p in doc.pages if p.id == page_id), None)
+        if not target_page:
+            return {"success": False, "error": f"Page '{page_id}' not found"}
+        render_targets.append((target_page, None))
+        kind = "page"
+        primary_page = target_page
+    else:
+        primary_page = doc.pages[doc.current_page]
+        render_targets.append((primary_page, None))
+        kind = "page"
+
+    # Render each target
+    blocks = []
+    total_count = 0
+    for page, root_el in render_targets:
+        el_by_id = {e["id"]: e for e in page.elements}
+        if root_el is None:
+            # Page export: walk page-root elements
+            roots = [e for e in page.elements if not e.get("parentId")]
+        else:
+            roots = [root_el]
+        # Track all rendered ids in this block to count elements in summary
+        block_seen = set()
+        block_lines = []
+        for r in roots:
+            line = _render_jsx_element(r, el_by_id, page, indent=3, seen=set(), emitted=block_seen)
+            if line:
+                block_lines.append(line)
+        if not block_lines:
+            blocks.append("")
+            continue
+        blocks.append("\n".join(block_lines))
+        # Count unique elements rendered in this block (including descendants)
+        if root_el is None:
+            for e in page.elements:
+                if e["id"] in block_seen:
+                    total_count += 1
+        else:
+            subtree = _collect_subtree_ids(page, root_el["id"])
+            total_count += len(subtree & block_seen)
+
+    body = "\n\n".join(b for b in blocks if b)
+    header = "function PaperCanvas() {\n  return (\n    <>\n"
+    footer = "    </>\n  );\n}"
+    if body:
+        jsx = header + body + "\n" + footer
+    else:
+        jsx = "function PaperCanvas() {\n  return (\n    <></>\n  );\n}"
+
+    summary = f"Exported JSX for {kind} ({total_count} elements)"
+
+    return {
+        "success": True,
+        "kind": kind,
+        "pageId": primary_page.id,
+        "nodeId": response_node_id,
+        "nodeIds": response_node_ids,
+        "jsx": jsx,
+        "summary": summary,
+    }
+
+
+def _find_node_for_jsx(doc, node_id):
+    """Look up a node id across all pages. Returns (page, el) or (None, None).
+
+    If `node_id` equals a page id, returns (page, None) — caller treats as page export.
+    If `node_id` is not found anywhere, returns (None, None).
+    """
+    for page in doc.pages:
+        if page.id == node_id:
+            return page, None
+        for el in page.elements:
+            if el.get("id") == node_id:
+                return page, el
+    return None, None
+
+
+def _jsx_escape_text(value) -> str:
+    """Escape a string for safe use as JSX text content.
+
+    JSX treats `{` and `}` as the start of an embedded expression, and `<`/`>`/`&`
+    as markup. We use HTML-style numeric character references for braces so the
+    output remains valid JSX text. Newlines are collapsed to spaces to keep
+    output on a single line per text node.
+    """
+    if value is None:
+        return ""
+    s = str(value)
+    s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    s = s.replace("{", "&#123;").replace("}", "&#125;")
+    s = s.replace("\r", " ").replace("\n", " ")
+    return s
+
+
+def _jsx_style_object(style) -> str:
+    """Render a style dict as the body of a JSX `style={{ ... }}` object literal.
+
+    Identifier-safe keys are emitted bare (`backgroundColor`); other keys
+    are double-quoted (`"stroke-width"`, `"--token"`). String values are
+    JSON-escaped; int/float/bool are emitted as JSON literals; `None` is
+    skipped. Returns "" for empty/None style (caller omits the attribute).
+    """
+    if not style or not isinstance(style, dict):
+        return ""
+    parts = []
+    for k, v in style.items():
+        if v is None:
+            continue
+        if _JSX_IDENT_RE.match(str(k)):
+            key_out = str(k)
+        else:
+            key_out = json.dumps(str(k))
+        if isinstance(v, bool):
+            val_out = "true" if v else "false"
+        elif isinstance(v, (int, float)):
+            val_out = json.dumps(v)
+        elif isinstance(v, str):
+            val_out = json.dumps(v)
+        else:
+            val_out = json.dumps(str(v))
+        parts.append(f"{key_out}: {val_out}")
+    return ", ".join(parts)
+
+
+def _render_jsx_element(el, el_by_id, page, indent, seen, emitted):
+    """Recursively render one element dict as a JSX string.
+
+    `seen` is the ancestor cycle guard (a frozenset of element ids already
+    on the current path). `emitted` is a mutable set that accumulates every
+    element id actually rendered, used by the caller to count elements for
+    the response summary.
+    """
+    eid = el.get("id", "")
+    if eid in seen:
+        return ""
+    new_seen = seen | {eid}
+    emitted.add(eid)
+
+    tag = el.get("tag") or "div"
+    el_name = el.get("name") or ""
+
+    # Attributes: always emit data-paper-node and data-paper-name as JSX
+    # expression attributes (always safe regardless of value contents).
+    attrs = (
+        f'data-paper-node={{{json.dumps(eid)}}} '
+        f'data-paper-name={{{json.dumps(el_name)}}}'
+    )
+    style_body = _jsx_style_object(el.get("style") or {})
+    if style_body:
+        attrs += f' style={{{{ {style_body} }}}}'
+
+    pad = "  " * indent
+    child_ids = _valid_child_ids(page, el)
+    el_text = el.get("text") or ""
+
+    if not el_text and not child_ids:
+        return f"{pad}<{tag} {attrs} />"
+
+    inner_chunks = []
+    if el_text:
+        inner_chunks.append(f"{pad}  {_jsx_escape_text(el_text)}")
+    for cid in child_ids:
+        child = el_by_id.get(cid)
+        if not child:
+            continue
+        line = _render_jsx_element(child, el_by_id, page, indent + 1, new_seen, emitted)
+        if line:
+            inner_chunks.append(line)
+    inner = "\n".join(inner_chunks)
+    return f"{pad}<{tag} {attrs}>\n{inner}\n{pad}</{tag}>"
 
 
 async def _create_artboard(doc_id: str, args: dict) -> dict:
@@ -1630,12 +1915,12 @@ TOOLS_LIST = [
     {"name": "get_screenshot", "description": "Get the latest stored screenshot and metadata for the document.", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Optional page ID."}, "nodeId": {"type": "string", "description": "Optional page or element ID."}, "scale": {"type": "number", "description": "Requested scale preference. Default 1."}, "transparent": {"type": "boolean", "description": "Requested transparency preference. Default false."}, "includeData": {"type": "boolean", "description": "Whether to include the screenshot data in the response. Default true."}}}},
     {"name": "write_html", "description": "Write HTML into a document. Supports targeted append/replace-children/replace modes. Use targetNodeId to target an existing element or page. Without targetNodeId, uses pageId or the current page.", "inputSchema": {"type": "object", "properties": {"html": {"type": "string", "description": "HTML string with inline styles. The outermost element fills the artboard automatically; no need to set position/width/height."}, "targetNodeId": {"type": "string", "description": "Target page or element ID. If targeting an element, the mode operates on that element. If targeting a page, the mode operates on the page root."}, "pageId": {"type": "string", "description": "Target page ID (used only if targetNodeId is not provided). If omitted, uses the current page."}, "mode": {"type": "string", "description": "One of: 'append' (default) — add as children of target, 'replace-children' — remove target's children then append, 'replace' — replace target element itself with new content"}}, "required": ["html"]}},
     {"name": "duplicate_nodes", "description": "Duplicate full element subtrees and return per-root descendant ID maps.", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}, "description": "Element node IDs to duplicate. Required, non-empty."}, "offsetX": {"type": "number", "description": "Horizontal offset applied to cloned root's positional style. Default 20."}, "offsetY": {"type": "number", "description": "Vertical offset applied to cloned root's positional style. Default 20."}}, "required": ["nodeIds"]}},
-    {"name": "update_styles", "description": "Update styles", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}, "styles": {"type": "object"}}, "required": ["nodeIds", "styles"]}},
+    {"name": "update_styles", "description": "Update styles", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}, "styles": {"type": "object"}, "removeStyleKeys": {"type": "array", "items": {"type": "string"}, "description": "Optional style keys to remove from element styles after applying styles. Must be an array of non-empty strings when provided. Applies to elements only; never reaches artboard/page updates. Example: ['left', 'top']."}}, "required": ["nodeIds", "styles"]}},
     {"name": "set_text_content", "description": "Set text content", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}, "text": {"type": "string"}}, "required": ["nodeIds", "text"]}},
     {"name": "rename_nodes", "description": "Rename element nodes and page/artboard nodes. Returns per-node results with oldName/newName/kind/pageId/node. Supports an optional pageId constraint to scope the lookup to a single page (or rename that page itself when a nodeId equals pageId).", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}, "description": "Node IDs to rename (elements and/or page IDs). Required, non-empty."}, "names": {"type": "object", "description": "Map of nodeId -> new name. Every requested ID must have a non-empty string entry (whitespace-only is invalid)."}, "pageId": {"type": "string", "description": "Optional page ID. If provided, validates first and scopes the lookup to that page; if a nodeId equals pageId, that page is renamed."}}, "required": ["nodeIds", "names"]}},
     {"name": "finish_working_on_nodes", "description": "Mark work finished", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "get_computed_styles", "description": "Get computed styles", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}}}},
-    {"name": "get_jsx", "description": "Export as JSX", "inputSchema": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}}}},
+    {"name": "get_jsx", "description": "Export as a JSX `function PaperCanvas()` component. Supports pageId (validated first), nodeId (page or element subtree), and nodeIds (multiple element subtrees; descendants of another requested node are dropped, ancestor kept). Emits valid React style object syntax, escapes text safely, and includes data-paper-node/data-paper-name expression attributes on every element. Read-only.", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Optional page ID. Validated first; constrains nodeId/nodeIds lookup to that page."}, "nodeId": {"type": "string", "description": "Optional single node ID. If it equals pageId, exports that page; otherwise exports that element subtree. Mutually exclusive with nodeIds."}, "nodeIds": {"type": "array", "items": {"type": "string"}, "description": "Optional list of element node IDs. Renders each subtree in page/traversal order. Per-page ancestor/descendant dedup: a requested descendant whose ancestor is also requested is dropped. Empty list behaves like no nodeIds (defaults to current page). Mutually exclusive with nodeId."}}}},
     {"name": "get_font_family_info", "description": "Get font info", "inputSchema": {"type": "object", "properties": {"fontFamily": {"type": "string"}}}},
     {"name": "save_document", "description": "Save document", "inputSchema": {"type": "object", "properties": {"filePath": {"type": "string"}}}},
     {"name": "open_document", "description": "Open document", "inputSchema": {"type": "object", "properties": {"filePath": {"type": "string"}}, "required": ["filePath"]}},

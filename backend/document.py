@@ -44,6 +44,67 @@ class Document(BaseModel):
 
 
 class DocumentStore:
+    # Shared tag → element type mapping. Identical to _TYPE_MAP in
+    # backend/parse_html.py so that write_html and open_document produce the
+    # same `type` for the same tag. Acceptable duplication for now; the two
+    # inference functions live in separate round-trip paths.
+    _TYPE_MAP = {
+        # Media / controls
+        "img": "image",
+        "video": "video",
+        "audio": "audio",
+        "canvas": "canvas",
+        "input": "input",
+        "textarea": "text",
+        "select": "select",
+        "button": "button",
+        "a": "link",
+        # Text / document
+        "span": "text",
+        "p": "text",
+        "em": "text",
+        "strong": "text",
+        "label": "text",
+        "figcaption": "text",
+        "h1": "heading", "h2": "heading", "h3": "heading",
+        "h4": "heading", "h5": "heading", "h6": "heading",
+        "ul": "list", "ol": "list", "li": "list-item",
+        "table": "table",
+        # SVG (lowercased by BeautifulSoup html.parser)
+        "svg": "svg",
+        "rect": "svg-rect",
+        "circle": "svg-circle",
+        "ellipse": "svg-ellipse",
+        "path": "svg-path",
+        "line": "svg-line",
+        "polyline": "svg-polyline",
+        "polygon": "svg-polygon",
+        "text": "svg-text",
+        "tspan": "svg-text",
+        "g": "svg-group",
+        "defs": "svg-defs",
+        "lineargradient": "svg-gradient",
+        "radialgradient": "svg-gradient",
+        "stop": "svg-stop",
+        "clippath": "svg-clip-path",
+        "mask": "svg-mask",
+        "pattern": "svg-pattern",
+        "use": "svg-use",
+        "image": "svg-image",
+        "symbol": "svg-symbol",
+        # Container / default
+        "div": "div",
+        "section": "div",
+        "article": "div",
+        "header": "div",
+        "footer": "div",
+        "main": "div",
+        "nav": "div",
+        "aside": "div",
+        "form": "div",
+        "figure": "div",
+    }
+
     def __init__(self):
         self.documents: dict[str, Document] = {}
         self._screenshot_data: dict[str, dict] = {}
@@ -235,15 +296,52 @@ class DocumentStore:
         return {"success": True}
 
     def update_element(self, doc_id: str, element_id: str, updates: dict) -> dict:
-        """Update an element"""
+        """Update an element.
+
+        Recognized update fields:
+          - Standard element fields (name, text, tag, type, etc.) are shallow-merged
+            into the element.
+          - ``style`` (dict) is deep-merged into the existing style dict (Task 16).
+          - ``removeStyleKeys`` (list[str], internal) is a private key that lists
+            style keys to remove after the style merge. It is stripped from
+            ``new_el`` so it is never stored on the element. Only string items
+            are acted on; non-strings are silently skipped (the MCP handler is
+            responsible for strict validation).
+        """
         doc = self.documents.get(doc_id)
         if not doc:
             return {"error": "Document not found"}
 
+        # Extract and discard the internal removal key from the public update
+        # payload so it is never stored on the element.
+        remove_style_keys = updates.get("removeStyleKeys")
+        clean_updates = {k: v for k, v in updates.items() if k != "removeStyleKeys"}
+
         for page in doc.pages:
             for i, el in enumerate(page.elements):
                 if el.get("id") == element_id:
-                    page.elements[i] = {**el, **updates}
+                    new_el = {**el, **clean_updates}
+                    # Step 1: style deep-merge (Task 16)
+                    if isinstance(updates.get("style"), dict):
+                        old_style = el.get("style") if isinstance(el.get("style"), dict) else {}
+                        new_el["style"] = {**old_style, **updates["style"]}
+                    # Step 2: explicit style key removal (Task 19)
+                    if isinstance(remove_style_keys, list):
+                        if isinstance(new_el.get("style"), dict):
+                            for k in remove_style_keys:
+                                if isinstance(k, str) and k:
+                                    new_el["style"].pop(k, None)
+                        elif isinstance(updates.get("style"), dict):
+                            # No existing style dict, but a style update was
+                            # provided: build a dict from the update, then
+                            # remove requested keys. The non-dict-style case
+                            # is intentionally left alone (per spec).
+                            merged = dict(updates["style"])
+                            for k in remove_style_keys:
+                                if isinstance(k, str) and k:
+                                    merged.pop(k, None)
+                            new_el["style"] = merged
+                    page.elements[i] = new_el
                     self._save(doc_id)
                     return {"success": True, "element": page.elements[i]}
 
@@ -1520,27 +1618,13 @@ class DocumentStore:
 
     def _infer_type(self, tag: str, style: dict, text: str) -> str:
         """Infer element type from tag, style, and text content."""
-        text_tags = {"p", "span", "em", "strong", "label", "figcaption"}
-        heading_tags = {"h1", "h2", "h3", "h4", "h5", "h6"}
-        if tag in ("img",):
-            return "image"
-        if tag in heading_tags:
-            return "heading"
-        if tag in ("ul", "ol"):
-            return "list"
-        if tag == "li":
-            return "list-item"
-        if tag in ("svg",):
-            return "svg"
-        if tag == "table":
-            return "table"
-        if tag in text_tags:
-            return "text"
+        if tag in self._TYPE_MAP:
+            return self._TYPE_MAP[tag]
         if text:
             return "text"
         if style.get("fontSize"):
             return "text"
-        return "rectangle"
+        return "div"
 
     def _parse_element_tree(self, tag, elements: list, parent_id: str = None):
         """Recursively walk BeautifulSoup tag tree, appending element dicts to `elements`.
