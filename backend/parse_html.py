@@ -122,6 +122,8 @@ def _collect_attrs(attrs: dict) -> dict:
         # Text
         "textAnchor", "dominantBaseline", "fontFamily", "fontSize", "fontWeight",
         "letterSpacing", "textDecoration", "fontStyle", "fontVariant",
+        # TextPath / SVG text measurement
+        "startOffset", "textLength", "lengthAdjust", "method", "spacing", "side",
         # Gradient & filter
         "offset", "stopColor", "stopOpacity",
         "gradientUnits", "spreadMethod", "gradientTransform",
@@ -201,6 +203,11 @@ def parse_html_elements(html: str) -> list[dict]:
         attrs = dict(tag.attrs)
         style = _collect_attrs(attrs)
 
+        # Preserve any native HTML/SVG id separately from the backend node id.
+        # Export paths render style["id"] back out as a native id="..." attribute.
+        if "id" in attrs and attrs["id"]:
+            style["id"] = attrs["id"]
+
         # The outermost element fills the artboard naturally.
         # Strip any layout props that would override natural flow — the artboard
         # provides the viewport dimensions (375×812 etc.). The frontend sets
@@ -223,8 +230,6 @@ def parse_html_elements(html: str) -> list[dict]:
         text = "".join(direct_strings).strip() or None
 
         el_id = f"n-{str(uuid.uuid4())[:8]}"
-        if "id" in attrs and attrs["id"]:
-            el_id = attrs["id"]
 
         # Resolve parent from BeautifulSoup parent pointer
         parent_id = None

@@ -6,6 +6,7 @@ import { LayerPanel } from './panels/LayerPanel';
 import { PropertyPanel } from './panels/PropertyPanel';
 import { bridge } from './bridge/api';
 import { syncManager } from './store/syncManager';
+import { computeStartupFocusTransform } from './canvas/viewport';
 import type { Document } from './types';
 
 // ─── Global Sync Manager (server-first, pausable polling) ────────────────────
@@ -20,6 +21,7 @@ export function App() {
   const { setDocument, setTransform, transform, spaceDown, setSpaceDown } = useEditorStore();
   const docIdRef = useRef('default');
   const syncIntervalRef = useRef<number | null>(null);
+  const hasFocusedStartupRef = useRef(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
@@ -30,15 +32,25 @@ export function App() {
       try {
         const doc = await bridge.getDocument(docIdRef.current);
         setDocument(doc as Document);
-        if ((doc as Document).id) docIdRef.current = (doc as Document).id;
+        const startupTransform = computeStartupFocusTransform(doc as Document);
+        if (startupTransform && !hasFocusedStartupRef.current) {
+          setTransform(startupTransform);
+          hasFocusedStartupRef.current = true;
+        }
+        if ((doc as Document).id) {
+          docIdRef.current = (doc as Document).id;
+          bridge.setActiveDocId((doc as Document).id);
+        }
       } catch (e) {
         // Backend unreachable — show empty state, user can click + to create
         setDocument({
-          id: docIdRef.current,
+          id: 'default',
           title: 'Untitled',
           pages: [],
           current_page: 0,
         });
+        docIdRef.current = 'default';
+        bridge.setActiveDocId('default');
       }
     };
     init();
@@ -93,9 +105,7 @@ export function App() {
       // Tool shortcuts
       if (e.key === 'v' || e.key === 'V') state.setActiveTool('select');
       else if (e.key === 'h' || e.key === 'H') state.setActiveTool('pan');
-      else if (e.key === 'r' || e.key === 'R') state.setActiveTool('rectangle');
-      else if (e.key === 't' || e.key === 'T') state.setActiveTool('text');
-      else if (e.key === 'f' || e.key === 'F') state.setActiveTool('frame');
+      // R, T, F shortcuts removed — tools disabled in Task 24
 
       // Delete / Backspace → delete selected element
       if (e.key === 'Delete' || e.key === 'Backspace') {

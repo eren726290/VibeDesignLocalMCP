@@ -3,38 +3,16 @@ import type { Tool } from '../types';
 
 // ─── Fit to canvas handler ─────────────────────────────────────────────────────
 
+import { computeFitAllTransform } from '../canvas/viewport';
+
 function fitCanvas() {
   const { document, setTransform } = useEditorStore.getState();
   if (!document || document.pages.length === 0) return;
 
-  // Compute bounding box of all artboards (in canvas space)
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const page of document.pages) {
-    if (page.x < minX) minX = page.x;
-    if (page.y < minY) minY = page.y;
-    if (page.x + page.width > maxX) maxX = page.x + page.width;
-    if (page.y + page.height > maxY) maxY = page.y + page.height;
-  }
+  const transform = computeFitAllTransform(document);
+  if (!transform) return;
 
-  const bw = maxX - minX;
-  const bh = maxY - minY;
-  if (bw <= 0 || bh <= 0) return;
-
-  // Viewport area (subtract sidebar widths)
-  const vpW = window.innerWidth - 40 - 280;
-  const vpH = window.innerHeight;
-
-  // Scale to fit all artboards with 10% padding, cap at 2x
-  const padding = 0.1;
-  const scaleX = vpW / bw / (1 + padding);
-  const scaleY = vpH / bh / (1 + padding);
-  const newScale = Math.min(scaleX, scaleY, 2);
-
-  // Center the bounding box in the viewport
-  const finalTx = (vpW - bw * newScale) / 2 - minX * newScale;
-  const finalTy = (vpH - bh * newScale) / 2 - minY * newScale;
-
-  setTransform({ scale: newScale, translateX: finalTx, translateY: finalTy });
+  setTransform(transform);
 }
 
 // ─── Fit icon: box with a centered dot ───────────────────────────────────────
@@ -89,7 +67,7 @@ const toolNames: Record<Tool, string> = {
 export function Toolbar() {
   const { activeTool, setActiveTool } = useEditorStore();
 
-  const tools: Tool[] = ['select', 'pan', 'frame', 'rectangle', 'text'];
+  const tools: Tool[] = ['select', 'pan'];
 
   return (
     <div

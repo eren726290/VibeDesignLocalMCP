@@ -13,7 +13,9 @@ interface EditorState {
   selection: Selection | null;
   setSelection: (sel: Selection | null) => void;
   selectedArtboardId: string | null;
+  selectElement: (sel: Selection | null) => void;
   selectArtboard: (id: string | null) => void;
+  clearSelection: () => void;
   updateArtboard: (id: string, updates: Partial<Page>) => void;
   transform: Transform;
   setTransform: (t: Partial<Transform>) => void;
@@ -52,13 +54,46 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   expandedNodes: new Set<string>(),
   selectedArtboardId: null,
 
-  setActiveTool: (tool) => set({ activeTool: tool }),
+  setActiveTool: (tool) => {
+    const disabled = new Set<Tool>(['frame', 'rectangle', 'text']);
+    set({ activeTool: disabled.has(tool) ? 'select' : tool });
+  },
 
   setSpaceDown: (v) => set({ spaceDown: v }),
 
   setSelection: (sel) => set({ selection: sel }),
 
-  selectArtboard: (id) => set({ selectedArtboardId: id }),
+  selectElement: (sel) => {
+    const { document } = get();
+    if (!document || !sel) {
+      set({ selection: sel, selectedArtboardId: null });
+      return;
+    }
+    const pageIndex = document.pages.findIndex((page) =>
+      page.elements.some((element) => element.id === sel.nodeId)
+    );
+    set({
+      selection: sel,
+      selectedArtboardId: null,
+      document: pageIndex >= 0 ? { ...document, current_page: pageIndex } : document,
+    });
+  },
+
+  selectArtboard: (id) => {
+    const { document } = get();
+    if (!document || !id) {
+      set({ selectedArtboardId: id, selection: null });
+      return;
+    }
+    const pageIndex = document.pages.findIndex((page) => page.id === id);
+    set({
+      selectedArtboardId: id,
+      selection: null,
+      document: pageIndex >= 0 ? { ...document, current_page: pageIndex } : document,
+    });
+  },
+
+  clearSelection: () => set({ selection: null, selectedArtboardId: null }),
 
   updateArtboard: (id, updates) => {
     const { document } = get();
@@ -86,10 +121,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   }),
 
   expandToNode: (nodeId) => {
-    const { document, selectedArtboardId } = get();
+    const { document } = get();
     if (!document) return;
-    const currentPage = document.pages.find((p) => p.id === selectedArtboardId)
-      ?? document.pages[document.current_page];
+    // Always use current_page — same page model as LayerPanel.
+    // selectElement() already resolved and updated current_page before this runs.
+    const currentPage = document.pages[document.current_page];
     if (!currentPage) return;
     const elementMap = new Map(currentPage.elements.map((el) => [el.id, el]));
     const toExpand: string[] = [];
@@ -116,7 +152,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   setDocument: (doc) => {
-    set({ document: doc });
+    set({ document: doc, docId: doc.id });
     get().pushHistory();
   },
 
@@ -299,7 +335,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setCurrentPage: (index) => {
     const { document } = get();
     if (!document) return;
-    set({ document: { ...document, current_page: index }, selection: null });
+    set({ document: { ...document, current_page: index }, selection: null, selectedArtboardId: document.pages[index]?.id ?? null });
     bridge.setCurrentPage(document.id, index).catch(() => {});
   },
 

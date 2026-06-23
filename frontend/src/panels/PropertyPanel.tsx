@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import type { Page } from '../types';
+import type { Page, Element, Document } from '../types';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -33,6 +33,46 @@ function ColorRow({ label, value, onChange }: { label: string; value: string; on
   );
 }
 
+// ─── Identity Section ─────────────────────────────────────────────────────────
+
+function IdentitySection({
+  id,
+  name,
+  tagOrType,
+  parentId,
+  childrenCount,
+  owningPageName,
+}: {
+  id: string;
+  name: string;
+  tagOrType: string;
+  parentId?: string | null;
+  childrenCount?: number;
+  owningPageName?: string;
+}) {
+  const labelStyle: React.CSSProperties = { color: '#888', fontSize: 10, width: 80, flexShrink: 0, textTransform: 'uppercase' };
+  const valStyle: React.CSSProperties = { color: '#bbb', fontSize: 11, wordBreak: 'break-all', fontFamily: 'monospace' };
+  const rowStyle: React.CSSProperties = { display: 'flex', padding: '4px 0', alignItems: 'flex-start' };
+
+  return (
+    <div style={{ padding: '12px 16px', borderBottom: '1px solid #333' }}>
+      <div style={{ color: '#888', fontSize: 10, textTransform: 'uppercase', marginBottom: 8, fontWeight: 600 }}>Identity</div>
+      <div style={rowStyle}><span style={labelStyle}>ID</span><span style={valStyle}>{id}</span></div>
+      <div style={rowStyle}><span style={labelStyle}>Name</span><span style={{ ...valStyle, fontFamily: 'system-ui' }}>{name}</span></div>
+      <div style={rowStyle}><span style={labelStyle}>Type/Tag</span><span style={valStyle}>{tagOrType}</span></div>
+      {parentId !== undefined && (
+        <div style={rowStyle}><span style={labelStyle}>Parent ID</span><span style={valStyle}>{parentId || 'none'}</span></div>
+      )}
+      {childrenCount !== undefined && (
+        <div style={rowStyle}><span style={labelStyle}>Children</span><span style={valStyle}>{childrenCount}</span></div>
+      )}
+      {owningPageName && (
+        <div style={rowStyle}><span style={labelStyle}>Artboard</span><span style={{ ...valStyle, fontFamily: 'system-ui' }}>{owningPageName}</span></div>
+      )}
+    </div>
+  );
+}
+
 // ─── Artboard Properties ───────────────────────────────────────────────────────
 
 function ArtboardProps({ page }: { page: Page }) {
@@ -53,7 +93,14 @@ function ArtboardProps({ page }: { page: Page }) {
         <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>{page.name}</span>
       </div>
 
-      <div style={{ padding: '0 16px 16px' }}>
+      <IdentitySection
+        id={page.id}
+        name={page.name}
+        tagOrType="page (artboard)"
+        childrenCount={page.elements.length}
+      />
+
+      <div style={{ padding: '12px 16px 16px' }}>
         <div style={{ color: '#888', fontSize: 10, textTransform: 'uppercase', marginBottom: 8 }}>Position</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           {[['X', page.x, 'x'], ['Y', page.y, 'y']].map(([label, val, key]) => (
@@ -119,12 +166,8 @@ function ArtboardProps({ page }: { page: Page }) {
 
 // ─── Element Properties ───────────────────────────────────────────────────────
 
-function ElementProps() {
-  const { document, selection, updateElement } = useEditorStore();
-  if (!document || !selection) return null;
-  const currentPage = document.pages[document.current_page];
-  const element = currentPage.elements.find((el) => el.id === selection.nodeId);
-  if (!element) return null;
+function ElementProps({ element, page }: { element: Element; page: Page }) {
+  const { updateElement } = useEditorStore();
 
   const textDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [textValue, setTextValue] = useState(element.text ?? '');
@@ -158,6 +201,15 @@ function ElementProps() {
         <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>{element.name}</span>
         <span style={{ marginLeft: 6, color: '#555', fontSize: 10 }}>{element.tag}</span>
       </div>
+
+      <IdentitySection
+        id={element.id}
+        name={element.name}
+        tagOrType={`${element.tag} (${element.type})`}
+        parentId={element.parentId}
+        childrenCount={element.children?.length ?? 0}
+        owningPageName={page.name}
+      />
 
       {/* Text content — editable at the top for text elements */}
       {hasText && (
@@ -225,9 +277,9 @@ function ElementProps() {
         </div>
       )}
 
-      {/* Coordinates */}
+      {/* Coordinates (Disabled / Read-only for elements) */}
       {!isSvg && (
-        <div style={{ padding: '0 16px 16px' }}>
+        <div style={{ padding: '12px 16px 16px' }}>
           <div style={{ color: '#888', fontSize: 10, textTransform: 'uppercase', marginBottom: 8 }}>Coordinates</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             {[['X', 'left'], ['Y', 'top']].map(([label, key]) => (
@@ -235,15 +287,15 @@ function ElementProps() {
                 <label style={{ color: '#666', fontSize: 10 }}>{label}</label>
                 <input type="number"
                   value={parseFloat(element.style[key as keyof typeof element.style] as string) || 0}
-                  onChange={(e) => updateStyle(key, `${e.target.value}px`)}
-                  style={inputStyle} />
+                  disabled
+                  style={{ ...inputStyle, color: '#666', cursor: 'not-allowed' }} />
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Size */}
+      {/* Size (Disabled / Read-only for elements) */}
       <div style={{ padding: '0 16px 16px' }}>
         <div style={{ color: '#888', fontSize: 10, textTransform: 'uppercase', marginBottom: 8 }}>Size</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -252,8 +304,8 @@ function ElementProps() {
               <label style={{ color: '#666', fontSize: 10 }}>{label}</label>
               <input type="number" min={0}
                 value={parseFloat(element.style[key as keyof typeof element.style] as string) || 0}
-                onChange={(e) => updateStyle(key, `${e.target.value}px`)}
-                style={inputStyle} />
+                disabled
+                style={{ ...inputStyle, color: '#666', cursor: 'not-allowed' }} />
             </div>
           ))}
         </div>
@@ -364,9 +416,12 @@ function ExportSection() {
   const [exporting, setExporting] = useState(false);
 
   const currentPage = document?.pages[document.current_page];
-  const targetArtboardId = selectedArtboardId ?? currentPage?.id;
-  const targetArtboard = currentPage;
 
+  const resolved = (document && selection) ? findElementAndPage(document, selection.nodeId) : null;
+  const targetElement = resolved?.element;
+  const targetArtboard = resolved?.page ?? currentPage;
+
+  const targetArtboardId = selectedArtboardId ?? targetArtboard?.id;
   const hasTarget = !!(targetArtboardId || selection?.nodeId);
 
   const handleExport = async () => {
@@ -481,7 +536,11 @@ function ExportSection() {
       </div>
       {/* Target label */}
       <div style={{ fontSize: 10, color: '#555', marginBottom: 8 }}>
-        {selection?.nodeId ? `Element: ${targetArtboard?.elements.find((e) => e.id === selection.nodeId)?.name || selection.nodeId}` : targetArtboard ? `Artboard: ${targetArtboard.name}` : 'Nothing selected'}
+        {selection?.nodeId
+          ? `Element: ${targetElement?.name || selection.nodeId}`
+          : targetArtboard
+          ? `Artboard: ${targetArtboard.name}`
+          : 'Nothing selected'}
       </div>
       <button
         onClick={handleExport}
@@ -508,6 +567,15 @@ function ExportSection() {
   );
 }
 
+// Helper to find selected element across all pages of the document
+const findElementAndPage = (document: Document, nodeId: string): { element: Element; page: Page } | null => {
+  for (const page of document.pages) {
+    const el = page.elements.find((e) => e.id === nodeId);
+    if (el) return { element: el, page };
+  }
+  return null;
+};
+
 // ─── Property Panel ───────────────────────────────────────────────────────────
 
 export function PropertyPanel() {
@@ -528,6 +596,8 @@ export function PropertyPanel() {
   const currentPage = document.pages[document.current_page];
   if (!currentPage) return null;
 
+  const resolved = selection ? findElementAndPage(document, selection.nodeId) : null;
+
   return (
     <div className="paper-scroll" style={{
       width: 280, background: '#1a1a1a', borderLeft: '1px solid #333', overflow: 'auto',
@@ -536,8 +606,19 @@ export function PropertyPanel() {
       <div style={{ flex: 1, overflow: 'auto' }}>
         {selectedArtboardId ? (
           <ArtboardProps page={document.pages.find(p => p.id === selectedArtboardId) || currentPage} />
+        ) : resolved ? (
+          <ElementProps key={resolved.element.id} element={resolved.element} page={resolved.page} />
         ) : selection ? (
-          <ElementProps key={selection.nodeId} />
+          <div style={{ padding: '12px 16px', color: '#888', fontSize: 12 }}>
+            <div style={{ color: '#fff', fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Missing Selection</div>
+            <div style={{ display: 'flex', padding: '4px 0', alignItems: 'flex-start' }}>
+              <span style={{ color: '#888', fontSize: 10, width: 80, flexShrink: 0, textTransform: 'uppercase' }}>Selected ID</span>
+              <span style={{ color: '#bbb', fontSize: 11, wordBreak: 'break-all', fontFamily: 'monospace' }}>{selection.nodeId}</span>
+            </div>
+            <div style={{ color: '#c93b3b', fontSize: 10, marginTop: 12 }}>
+              Warning: The selected element could not be found on any artboard.
+            </div>
+          </div>
         ) : (
           <ArtboardProps page={currentPage} />
         )}

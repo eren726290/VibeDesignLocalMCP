@@ -182,3 +182,18 @@ paper_clone_temp/
 - **Backend debugging**: after changing Python code, restart the backend manually
 - **AI debugging**: before each test, confirm the backend process is running: `lsof -i :3004`
 - **Test MCP**: test directly with curl: `curl -X POST http://127.0.0.1:3004/mcp -H "Content-Type: application/json" -d '{"method":"initialize","params":{},"id":1}'`
+
+---
+
+## Clean Runtime
+
+Workspace data persists across repo deletion/reinstall at:
+
+- **`~/.paper_clone/data/*.json`** — Document JSON files. Deleting the repo does not touch this directory.
+- **`localStorage['paper-active-doc']`** — Frontend stores the active document ID here. All API calls use this value.
+- **Original/fork collision**: Original VibeDesign and this fork share the same default ports (3004, 5175) and browser origin (`localhost:5175`). If you previously ran the original on the same machine, your browser may still have a stale document ID in localStorage.
+
+**To start clean:**
+- Delete or move `~/.paper_clone/data/` to reset saved documents
+- Clear `localStorage` for `localhost:5175` (DevTools → Application → Local Storage → clear key `paper-active-doc`)
+- Kill any process on ports 3004 and 5175

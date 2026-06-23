@@ -400,7 +400,7 @@ export function LayerPanel() {
   const {
     document,
     selection,
-    setSelection,
+    selectElement,
     expandedNodes,
     toggleExpanded,
     setCurrentPage,
@@ -456,13 +456,14 @@ export function LayerPanel() {
 
   const handleSelectElement = (element: Element) => {
     setActiveTool('select');
-    setSelection({
+    selectElement({
       nodeId: element.id,
       x: parseFloat(element.style.left || '0'),
       y: parseFloat(element.style.top || '0'),
       width: parseFloat(element.style.width || '100'),
       height: parseFloat(element.style.height || '100'),
     });
+    useEditorStore.getState().expandToNode(element.id);
   };
 
   const handleAddPage = () => {

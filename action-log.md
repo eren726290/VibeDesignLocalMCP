@@ -878,3 +878,661 @@ OpenCode does not write this file. Codex reviews completed work and records the 
     - `move_nodes` still working after style-key removal
 - Notes:
   - Whole-document `export_html` still legitimately includes `left` and `top` on page wrapper styles. The review checked the target element style specifically.
+
+### Documentation Update - Add Advanced Agent Repair Heuristics
+
+- Actor: Codex
+- Time: 2026-06-06T00:24:16Z
+- Summary: Added an advanced/polish item to track agent repair heuristics as advice after Tasks 16-19 passed PC validation.
+- Files changed by Codex:
+  - `to-do.md`
+  - `action-log.md`
+- Reason:
+  - The PC diagnosis and live misplacement tests showed the editing tool workflow passes.
+  - A separate "Issue 2" observation about agent repair strategy is useful as future workflow polish, but it is not a blocker for the Task 16-19 editing checkpoint.
+- Notes:
+  - The new item documents how agents should infer likely repair targets from computed styles, tree structure, names, tags, and sibling patterns.
+  - It explicitly keeps the item under Advanced / Polish so the passed editing test is not downgraded.
+
+## 2026-06-09
+
+### Diagnosis Round - Human Frontend Versus Agent MCP Path
+
+- Actor: Codex
+- Summary: Recorded the user-run 7-prompt diagnosis and Paper/VibeDesign comparison as planning decisions.
+- Files changed by Codex:
+  - `architecture.md`
+  - `to-do.md`
+  - `action-log.md`
+- Confirmed:
+  - Agent/MCP runtime path is healthy for create/write/read workflows.
+  - `POST /mcp HTTP/1.1" 200 OK` represents agent tool calls.
+  - Repeating `GET /api/documents/... 200 OK` is frontend polling.
+  - `OPTIONS ... 200 OK` is normal browser preflight.
+  - Surgical agent editing can replace the broken manual text tool for the agent-first product direction.
+- Bugs found:
+  - `update_styles` routes dual-use keys such as `backgroundColor` before checking whether the target is a page/artboard or element.
+  - Artboards panel current-page mutation can fail through the human frontend route.
+  - Manual Text, Frame, and Rectangle tools are broken enough to remove/disable short term.
+  - Human move behavior either snaps back when document identity mismatches, or persists bad `left`/`top` when it reaches `default`.
+  - Backend REST routes can return HTTP `200 OK` while the internal mutation result is `{"error": "Document not found"}`.
+  - Frontend startup can open far away from the artboards, requiring manual zoom/pan to find pages.
+  - Canvas selection and layer-panel sync are not Paper-like or reliable enough.
+- Product decisions:
+  - Keep backend/MCP as the source of truth.
+  - Treat frontend as visual review, selection, inspection, and navigation first.
+  - Redefine cursor/move as Select.
+  - Keep Pan as the canvas navigation tool.
+  - Disable/remove Text, Frame, and Rectangle toolbar tools from the primary UI.
+  - Build shape/SVG support as an agent-first pipeline, not as a quick repair of the Rectangle tool.
+  - Prefer a minimal new Vite + React frontend shell if patching the existing frontend costs more than replacing its interaction model.
+- Process decision:
+  - Before starting a major new round such as frontend rebuild, SVG pipeline, editing pipeline follow-up, or export pipeline, Codex should discuss the round direction and next 4-5 tasks with the user before assigning work.
+
+### Task 21 Review - Runtime Document Identity And Clean Startup
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 21 implementation and made one small reviewer fix.
+- Files reviewed:
+  - `frontend/src/bridge/api.ts`
+  - `frontend/src/App.tsx`
+  - `frontend/src/store/editorStore.ts`
+  - `README.md`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `frontend/src/bridge/api.ts`
+  - `frontend/src/App.tsx`
+  - `frontend/src/store/editorStore.ts`
+  - `README.md`
+- Files changed by Codex during review:
+  - `frontend/src/App.tsx`
+  - `action-log.md`
+- Review result: accepted after minor fix.
+- OpenCode changes accepted:
+  - Added exported `setActiveDocId()` to the frontend bridge.
+  - Exposed `setActiveDocId` on the bridge object and `window.paperBridge` type.
+  - Synced backend-returned document IDs back to `paper-active-doc` during startup.
+  - Updated `editorStore.setDocument()` to set both `document` and `docId`.
+  - Added a README Clean Runtime section documenting `~/.paper_clone/data`, `paper-active-doc`, original/fork localhost collision risk, and clean testing steps.
+- Codex reviewer fix:
+  - In the backend-unreachable startup catch path, reset the placeholder document, `docIdRef`, and `paper-active-doc` to `default` instead of preserving a possibly stale `doc-mpxojyrd` value.
+- Verification:
+  - `npm run build` from `frontend/` passed.
+  - `git diff --check` passed.
+  - Restored generated `frontend/tsconfig.tsbuildinfo` after build so build output is not part of the task diff.
+- Notes:
+  - This task fixes frontend identity convergence only. Backend HTTP status honesty, `update_styles` dual-use key routing, toolbar disablement, move/select redesign, viewport focus, frontend shell work, and SVG/shape pipeline remain separate future tasks.
+
+### Task 22 Review - Backend REST Error Status Honesty
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 22 implementation and made one small reviewer fix.
+- Files reviewed:
+  - `backend/main.py`
+  - `backend/document.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/main.py`
+- Files changed by Codex during review:
+  - `backend/main.py`
+  - `action-log.md`
+- Review result: accepted after minor fix.
+- OpenCode changes accepted:
+  - Added `HTTPException` import.
+  - Added `_raise_for_store_error()` helper for REST routes.
+  - Converted failed `doc_store` mutation/export results into HTTP errors instead of `200 OK`.
+  - Updated save/open, page CRUD, element CRUD, duplicate, and export REST routes.
+  - Preserved successful response shapes.
+  - Left `/mcp` behavior unchanged.
+- Codex reviewer fix:
+  - Extended `_raise_for_store_error()` mapping so `"does not exist"` returns `404` and `"cannot"` returns `400`, covering expected store errors such as missing export directories and deleting the last page without mislabeling them as server `500`s.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Reviewed `DocumentStore` error strings against the helper mapping.
+- Notes:
+  - This task does not fix valid-but-bad manual move payloads that write `left`/`top` to flex/layout nodes. Once the document ID is correct, that corruption is still a separate move/select model task.
+  - `POST /api/documents/{doc_id}/duplicate` still has a pre-existing parameter-shape mismatch between FastAPI query inference and frontend JSON body usage. This was reported by OpenCode and remains out of scope for Task 22.
+
+### Task 23 Review - update_styles Target-Aware Routing
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 23 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/main.py`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Moved `update_styles` style routing inside the per-node loop.
+  - Page/artboard targets now receive only page metadata keys: `x`, `y`, `backgroundColor`, `width`, `height`, and `name`.
+  - Element targets now receive all style keys as CSS, including dual-use keys such as `backgroundColor`, `width`, and `height`.
+  - Preserved Task 16 non-destructive style merge through `DocumentStore.update_element()`.
+  - Preserved Task 19 `removeStyleKeys` validation and element-only behavior.
+  - Kept the existing `{"success": True, "updated": [...]}` response shape.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Reviewed the active `_update_styles()` implementation directly and confirmed the previous eager split no longer drops element `backgroundColor`, `width`, or `height`.
+- Notes:
+  - `backend/main.py` also contains uncommitted Task 22 REST-status changes in the same file. The Task 23-specific change is limited to `_update_styles()`.
+  - Manual move/select behavior and stale `left`/`top` corruption remain separate frontend/model tasks.
+
+### Task 24 Review - Disable Broken Manual Creation Tools
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 24 implementation. No code fix was needed.
+- Files reviewed:
+  - `frontend/src/toolbar/Toolbar.tsx`
+  - `frontend/src/store/editorStore.ts`
+  - `frontend/src/App.tsx`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `frontend/src/toolbar/Toolbar.tsx`
+  - `frontend/src/store/editorStore.ts`
+  - `frontend/src/App.tsx`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Toolbar now renders only `select` and `pan` tools from the main tool list.
+  - `setActiveTool()` normalizes disabled tools `frame`, `rectangle`, and `text` to `select`.
+  - Keyboard shortcuts for `R`, `T`, and `F` were removed.
+  - Existing `Tool` union remains unchanged for compatibility.
+  - Backend/MCP capabilities were not removed.
+- Verification:
+  - `npm run build` from `frontend/` passed.
+  - `git diff --check` passed.
+  - Restored generated `frontend/tsconfig.tsbuildinfo` after build so build output is not part of the task diff.
+- Notes:
+  - Canvas drawing/create branches for the disabled tools remain in place but are unreachable through normal toolbar, keyboard, and store activation paths. Removing that dead code is optional cleanup, not required for Task 24.
+
+### Task 25 Review - Make Cursor Tool Selection-Only
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 25 implementation. No code fix was needed.
+- Files reviewed:
+  - `frontend/src/canvas/Canvas.tsx`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `frontend/src/canvas/Canvas.tsx`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Removed select-tool element drag initialization from `Canvas.tsx`.
+  - Preserved empty-canvas deselection.
+  - Preserved element click selection through `Element.tsx`.
+  - Preserved artboard selection/title-bar behavior through `ArtboardFrame.tsx`.
+  - Preserved pan behavior.
+  - Left disabled Text/Frame/Rectangle paths unreachable from Task 24.
+- Verification:
+  - `npm run build` from `frontend/` passed.
+  - `git diff --check` passed.
+  - Restored generated `frontend/tsconfig.tsbuildinfo` after build so build output is not part of the task diff.
+- Notes:
+  - Remaining drag/draw refs in `Canvas.tsx` are now unreachable for normal Select mode but were intentionally left for a later cleanup or frontend shell task.
+  - Page movement by title/name strip, layer panel sync, and viewport focus remain separate future tasks.
+
+### Task 26 Review - Focus Artboards On Frontend Startup
+
+- Actor: Codex
+- Summary: Reviewed Codex-Gemini Task 26 implementation. No code fix was needed.
+- Files reviewed:
+  - `frontend/src/canvas/viewport.ts`
+  - `frontend/src/App.tsx`
+  - `frontend/src/toolbar/Toolbar.tsx`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by Codex-Gemini:
+  - `frontend/src/canvas/viewport.ts`
+  - `frontend/src/App.tsx`
+  - `frontend/src/toolbar/Toolbar.tsx`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- Codex-Gemini changes accepted:
+  - Added shared viewport transform helpers for current-page focus and fit-all behavior.
+  - App startup now focuses the resolved `current_page` once after initial document load.
+  - If `current_page` cannot be resolved but pages exist, startup falls back to fitting all artboards.
+  - Empty documents keep the existing/default transform.
+  - Polling sync does not re-run startup focus, so user pan/zoom is not reset every second.
+  - The existing Fit button now reuses the shared fit-all helper.
+- Verification:
+  - `git diff --check` passed.
+  - `npm run build` from `frontend/` passed.
+  - Confirmed `current_page` is index-based in frontend and backend call sites.
+  - Restored generated `frontend/tsconfig.tsbuildinfo` after build so build output is not part of the task diff.
+- Notes:
+  - The helper uses the existing viewport sizing assumption from the previous Fit button: `window.innerWidth - 40 - 280` by `window.innerHeight`.
+  - For multi-page documents, Task 26 focuses the current page when it resolves. Fit-all is the fallback only when the current page is invalid or missing.
+
+### Task 27 Review - Stabilize Canvas/Layer Selection Sync
+
+- Actor: Codex
+- Summary: Reviewed Codex-Gemini Task 27 implementation and applied two small fixes for cross-artboard/current-page consistency.
+- Files reviewed:
+  - `frontend/src/store/editorStore.ts`
+  - `frontend/src/canvas/Canvas.tsx`
+  - `frontend/src/canvas/Element.tsx`
+  - `frontend/src/panels/LayerPanel.tsx`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by Codex-Gemini:
+  - `frontend/src/store/editorStore.ts`
+  - `frontend/src/canvas/Canvas.tsx`
+  - `frontend/src/canvas/Element.tsx`
+  - `frontend/src/panels/LayerPanel.tsx`
+- Files changed by Codex during review:
+  - `frontend/src/store/editorStore.ts`
+  - `action-log.md`
+- Review result: accepted with Codex fixes.
+- Codex-Gemini changes accepted:
+  - Added store-level `selectElement()` and `clearSelection()` helpers.
+  - Changed element canvas clicks to use `selectElement()`.
+  - Changed layer row clicks to use `selectElement()` and expand ancestors.
+  - Changed empty canvas click to clear both element and artboard selection.
+  - Preserved disabled-tool normalization and `docId` sync from earlier tasks.
+- Codex fixes applied:
+  - `selectElement()` now resolves the selected node's owning page and updates local `document.current_page`, so the layer panel can highlight elements selected on non-current artboards.
+  - `selectArtboard()` now resolves the selected artboard's page index and updates local `document.current_page`, so canvas artboard clicks and artboard-list clicks share one selection model.
+- Verification:
+  - `git diff --check` passed.
+  - `npm run build` from `frontend/` passed after review fixes.
+  - Restored generated `frontend/tsconfig.tsbuildinfo` after build so build output is not part of the task diff.
+- Notes:
+  - Selection helpers update frontend state only; they do not call backend mutation APIs.
+  - `setCurrentPage()` still calls the backend current-page route when the UI explicitly changes the current page.
+  - Manual element dragging and page title-bar behavior remain separate tasks.
+
+### Architecture Discussion - Frontend Future, Design Mode, And Skills
+
+- Actor: User + Codex
+- Summary: Captured future direction for VibeDesign frontend and backend pipeline discipline.
+- Files changed by Codex:
+  - `architecture.md`
+  - `to-do.md`
+  - `action-log.md`
+- Decisions captured:
+  - Backend pipeline comes first. New frontend features and MCP tools should sit on reliable backend storage, readback, diagnostics, and export behavior.
+  - The left panel should become a Framer/Paper-like layer tree where each row maps to a stable backend node ID.
+  - `get_tree_summary` is the agent-readable counterpart to the human layer tree.
+  - Select depends on accurate layer/tree/node/canvas identity mapping.
+  - Design Mode should build on Select, not replace it.
+  - Design Mode should be opt-in and initially use a fixed right-panel prompt targeting selected node IDs through MCP.
+  - Layout/domain skills should live above VibeDesign core, using patterns such as `SKILL.md`, `layout.md`, templates, ASCII layout references, and verification rules.
+  - The Kami Consulting skill/template pattern is a strong candidate for future VibeDesign layout skills.
+- Follow-up tasks added:
+  - Fix layer/tree/node identity mapping.
+  - Disable unsafe manual element resize mutations.
+  - Define Design Mode on top of Select.
+  - Add layout/domain skills above core MCP.
+
+### Task 28 Review - Disable Manual Element Resize Mutations
+
+- Actor: Codex
+- Summary: Reviewed Codex-Gemini Task 28 implementation and made one tiny formatting cleanup.
+- Files reviewed:
+  - `frontend/src/canvas/Element.tsx`
+  - `frontend/src/canvas/ArtboardFrame.tsx`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by Codex-Gemini:
+  - `frontend/src/canvas/Element.tsx`
+- Files changed by Codex during review:
+  - `frontend/src/canvas/Element.tsx`
+  - `action-log.md`
+- Review result: accepted.
+- Codex-Gemini changes accepted:
+  - Removed selected-element resize handle types/constants.
+  - Removed resize refs and resize mouse handlers from `Element.tsx`.
+  - Removed the selected-element handle rendering and kept an outline-only selection overlay.
+  - Removed the resize-driven `updateElement()` call that wrote `width`, `height`, `left`, and `top`.
+  - Changed element cursor styling from `move` to `default`, matching the selection-only model.
+  - Left text double-click editing and SVG render paths intact.
+  - Left `ArtboardFrame.tsx` page/artboard resize behavior untouched.
+- Codex cleanup:
+  - Removed extra blank lines left after `ElementProps`.
+- Verification:
+  - `git diff --check` passed.
+  - `npm run build` from `frontend/` passed.
+  - Confirmed remaining resize symbols are only in `ArtboardFrame.tsx`.
+  - Restored generated `frontend/tsconfig.tsbuildinfo` after build so build output is not part of the task diff.
+- Notes:
+  - The remaining `updateElement()` call in `Element.tsx` is for double-click text editing, not resize.
+  - Layer/tree/node identity mapping remains a separate priority because selection must point to the exact rendered node before Design Mode.
+
+### Task 29 Review - Layer-To-Canvas Node Identity Mapping
+
+- Actor: Codex
+- Summary: Reviewed Codex-Gemini Task 29 implementation and applied one small reviewer fix for explicit `position: static`.
+- Files reviewed:
+  - `frontend/src/canvas/Element.tsx`
+  - `frontend/src/store/editorStore.ts`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by Codex-Gemini:
+  - `frontend/src/canvas/Element.tsx`
+  - `frontend/src/store/editorStore.ts`
+- Files changed by Codex during review:
+  - `frontend/src/canvas/Element.tsx`
+  - `action-log.md`
+- Review result: accepted with Codex fix.
+- Codex-Gemini changes accepted:
+  - Diagnosed that layer rows pass correct `element.id` values and rendered nodes generally carry matching `data-paper-node` values.
+  - Changed element click selection to use the shared `selectElement()` path.
+  - Changed selected non-SVG element outlines to render for all selected elements, not only previously `isPositioned` elements.
+  - Added render-only `position: relative` injection for selected static/unpositioned elements so the absolute outline stays contained in the selected element.
+  - Changed `expandToNode()` to use `document.current_page`, matching the layer panel page model after `selectElement()` resolves the owning page.
+  - Documented SVG child outline limitations while preserving SVG node ID mapping.
+- Codex fix applied:
+  - Extended the render-only positioning-context check to include explicit `position: static`, not just missing `position`, because `static` also does not establish an absolute-position containing block.
+- Verification:
+  - `git diff --check` passed.
+  - `npm run build` from `frontend/` passed after the reviewer fix.
+  - Restored generated `frontend/tsconfig.tsbuildinfo` after build so build output is not part of the task diff.
+- Notes:
+  - Selection remains frontend state only; no backend mutation is introduced.
+  - SVG child nodes can carry the correct node ID but still do not yet get a visible SVG-native selection outline. That remains a future renderer/UI task.
+
+### Architecture Clarification - Skills Deferred Past V1
+
+- Actor: User + Codex
+- Summary: Clarified that layout/domain skills should not be implemented during the current V1 core-feature round.
+- Files changed by Codex:
+  - `architecture.md`
+  - `to-do.md`
+  - `action-log.md`
+- Decision:
+  - Skills are agent guidance/craftsmanship, not MCP tools.
+  - VibeDesign remains the tool/runtime/executor: document model, MCP tools, rendering, diagnostics, and export.
+  - Do not write skill system prompts, skill scaffolding, `.skill` folders, or skill-loading code for V1.
+  - Future skills should use progressive disclosure: only name/description by default, full `SKILL.md` and references/assets only when triggered.
+  - No single skill, including the Kami Consulting pattern, should become the default or definitive VibeDesign design system.
+- V1 focus:
+  - Continue core runtime, selection, inspector, frontend shell, SVG/shape pipeline, and export/PDF work before skills.
+
+### Architecture Clarification - Design Mode V1 Trigger
+
+- Actor: User + Codex
+- Summary: Documented the agreed minimal Design Mode V1 architecture.
+- Files changed by Codex:
+  - `design-mode.md`
+  - `architecture.md`
+  - `to-do.md`
+  - `action-log.md`
+- Decision:
+  - Design Mode's core gap is browser-to-agent communication.
+  - Agent-to-canvas already works through MCP.
+  - V1 should not use a full daemon/task queue, agent-specific headless CLI flags, ttyd/WeTTY/GoTTY terminal UI, or a visible browser terminal.
+  - V1 should run the agent inside a persistent tmux session and send Design Mode prompts into that session from a backend endpoint.
+  - The backend should use safe subprocess argument lists and tmux buffer/paste flow, not shell strings.
+  - The frontend should serialize sends by disabling the send button while pending.
+  - Loading completion can be revision-based for V1: store version at submit, clear when backend document version changes, and use a client-side timeout for no-op/error cases.
+- Research captured:
+  - Agentation: annotation/request lifecycle reference.
+  - React Grab: browser element selection and prompt UX reference.
+  - OpenCLI: prompt injection bridge inspiration for desktop/web agent surfaces, not terminal V1.
+  - Multica: robust daemon/task platform reference, too heavy for V1.
+  - ttyd/WeTTY/GoTTY: optional future browser terminal renderers, not required for the trigger.
+
+### Task 34 Review - SVG Attribute Rendering In HTML And JSX Exports
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 34 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/document.py`
+  - `backend/main.py`
+  - `backend/parse_html.py`
+  - `frontend/src/canvas/Element.tsx`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/document.py`
+  - `backend/main.py`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Added backend SVG tag and attribute sets for export-time splitting.
+  - Updated `DocumentStore._render_element()` so SVG attributes are emitted as XML attributes while non-SVG CSS remains in `style=""`.
+  - Updated `_render_jsx_element()` so SVG attributes are emitted as JSX attributes while non-SVG CSS remains in `style={{ ... }}`.
+  - Preserved the existing data model: SVG attributes still live in the element `style` dict.
+  - Left frontend, parser, Design Mode, PDF/export_pdf, and SVG mutation tools untouched.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Independent SVG export checks passed for `export_html`, `get_page_html`, `get_node_html`, `save_document`, and `get_jsx`.
+  - Verified SVG attrs such as `viewBox`, `cx`, `cy`, `r`, `d`, `fill`, `stroke-width`, `strokeWidth`, `font-family`, `fontFamily`, `gradient-units`, and `stop-color` are emitted as attributes, not SVG CSS style entries.
+  - Verified normal HTML element styles still export as CSS style entries.
+  - Verified export does not mutate the stored element style dict.
+- Notes:
+  - SVG `id` attribute round-tripping for references such as gradients remains a separate parser/data-model limitation. Task 34 did not introduce it and correctly left it out of scope.
+  - `backend/main.py` still includes earlier uncommitted Task 22 and Task 23 changes in the same file; the Task 34-specific changes are limited to SVG constants and `_render_jsx_element()`.
+
+### Task 35 Review - Preserve SVG Native IDs For Defs And References
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 35 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/parse_html.py`
+  - `backend/document.py`
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/parse_html.py`
+  - `backend/document.py`
+  - `backend/main.py`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Preserved native SVG `id` values for SVG tags by storing them in the existing SVG-style attribute bucket during parsing.
+  - Added `id` to backend SVG attribute sets so HTML/XML export emits `id="..."` alongside `data-paper-node`.
+  - Added `id` to JSX SVG attributes so `get_jsx` preserves SVG refs.
+  - Kept non-SVG HTML `id` behavior unchanged.
+  - Left frontend, Design Mode, PDF/export_pdf, and SVG mutation tools untouched.
+- Verification:
+  - `python3 -m py_compile backend/parse_html.py backend/document.py backend/main.py` passed.
+  - `git diff --check` passed.
+  - Independent checks passed for parsing/exporting `linearGradient id="grad-a"`, `clipPath id="clip-a"`, `rect fill="url(#grad-a)"`, `clip-path="url(#clip-a)"`, and `use href="#bar-a"`.
+  - Verified `export_html`, `get_page_html`, `get_node_html`, `save_document`, and `get_jsx` preserve native IDs and references.
+  - Verified `data-paper-node` remains present and normal non-SVG HTML styles remain unchanged.
+- Notes:
+  - SVG tag casing remains a separate polish/compatibility issue: BeautifulSoup lowercases tags such as `linearGradient` and `clipPath` to `lineargradient` and `clippath`. Task 35 preserves IDs/refs but does not restore canonical SVG tag casing.
+
+### Task 36 Review - Emit Canonical SVG Tag Names In HTML And JSX Exports
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 36 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/document.py`
+  - `backend/main.py`
+  - `backend/parse_html.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/document.py`
+  - `backend/main.py`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Added canonical SVG tag mappings for export-only output.
+  - Export now renders `linearGradient`, `radialGradient`, `clipPath`, `foreignObject`, and `textPath` instead of the lowercased stored tag names.
+  - Internal `el["tag"]` values remain unchanged.
+  - Preserved Task 34 SVG attribute splitting and Task 35 native SVG ID/reference behavior.
+  - Left parser, frontend, Design Mode, PDF/export_pdf, and SVG mutation tools untouched.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Independent checks passed for `export_html`, `get_page_html`, `get_node_html`, `save_document`, and `get_jsx`.
+  - Verified stored tags remain lowercased while output emits canonical `linearGradient`, `radialGradient`, and `clipPath`.
+  - Verified native SVG IDs, `url(#...)` references, and SVG attributes remain preserved.
+  - Verified normal non-SVG HTML output remains unchanged.
+- Notes:
+  - This completes the immediate SVG export/readback repair sequence from Tasks 34-36. The next SVG implementation step can move to a surgical mutation tool such as `update_svg_attributes`, unless the user wants to return to human UI diagnosis first.
+
+### Task 37 Review - Add `update_svg_attributes` MCP Tool
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 37 implementation and applied one reviewer correction.
+- Files reviewed:
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/main.py`
+- Files changed by Codex during review:
+  - `backend/main.py`
+  - `action-log.md`
+- Review result: accepted after correction.
+- Correction applied by Codex:
+  - Added `foreignobject` and `textpath` to `backend/main.py` `_SVG_TAGS` so `update_svg_attributes` accepts those SVG nodes.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Independent MCP behavior checks passed for valid SVG attr updates, rejection paths, export/readback, `foreignobject`, `textpath`, and unchanged `update_styles` behavior.
+
+### Task 38 Review - SVG Tag-Set Parity For `foreignObject` And `textPath` Export
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 38 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/document.py`
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/document.py`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Added `foreignobject` and `textpath` to `DocumentStore._SVG_TAGS` so document-store HTML export applies canonical casing and SVG attr splitting.
+- Verification:
+  - `python3 -m py_compile backend/document.py backend/main.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Independent document-store export checks passed for `<foreignObject>`, `<textPath>`, `data-paper-node`, `data-paper-name`, XML attrs, existing canonical SVG tags, normal SVG attrs, and non-SVG style export.
+- Notes:
+  - `startOffset` still fell through as CSS at this point; that was intentionally assigned as Task 39.
+
+### Task 39 Review - Add Missing SVG TextPath/Text Attribute Support
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 39 implementation. No code fix was needed.
+- Files reviewed:
+  - `backend/parse_html.py`
+  - `backend/document.py`
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/parse_html.py`
+  - `backend/document.py`
+  - `backend/main.py`
+- Files changed by Codex during review:
+  - `action-log.md`
+- Review result: accepted.
+- OpenCode changes accepted:
+  - Added `startOffset`, `textLength`, `lengthAdjust`, `method`, `spacing`, and `side` to parser/export SVG attr lists.
+- Verification:
+  - `python3 -m py_compile backend/parse_html.py backend/document.py backend/main.py` passed.
+  - `git diff --check` passed.
+  - Independent checks passed for parser capture, camel/lower/kebab variants, `export_html`, `get_page_html`, `get_jsx`, `update_svg_attributes`, existing `href`, existing SVG exports, and non-SVG style export.
+
+### Task 40 Review - Add Read-Only `validate_svg` Diagnostic Tool
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 40 implementation, found contract failures, then corrected implementation directly.
+- Files reviewed:
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/main.py`
+- Files changed by Codex during review/correction:
+  - `backend/main.py`
+  - `action-log.md`
+- Review result: accepted after correction.
+- Issues found in OpenCode implementation:
+  - Reference resolution checked only `style["id"]`, but Task 40 required refs to resolve against `style["id"]` or `el["id"]`.
+  - `rect_missing_size` warned only when both `width` and `height` were missing, but Task 40 required warning when either was missing.
+  - Completion report described some warning codes as errors; implementation severity now matches the task spec.
+- Corrections applied by Codex:
+  - Added corrected SVG subtree collection for validation without collapsing duplicate element IDs.
+  - Added `_svg_ref_id()` fallback from native SVG style id to backend element id.
+  - Changed rect missing-size logic from AND to OR.
+  - Standardized issue/warning object creation and removed an unused local variable.
+- Verification:
+  - `python3 -m py_compile backend/main.py backend/document.py backend/parse_html.py` passed.
+  - `git diff --check` passed.
+  - Independent focused validation checks passed: 30 passed, 0 failed.
+  - Covered valid SVGs, missing URL/href refs, duplicate IDs, invalid viewBox, missing primitive attrs, outside-viewBox warnings, complex values, page/descendant targeting, non-SVG rejection, missing node/page rejection, no mutation, `get_svg_summary`, and `update_svg_attributes`.
+
+### Task 41 Review - Decouple Backend Node IDs From Native HTML/SVG IDs
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 41 implementation and applied one reviewer correction in `validate_svg` reference parsing.
+- Files reviewed:
+  - `backend/parse_html.py`
+  - `backend/document.py`
+  - `backend/main.py`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Files changed by OpenCode:
+  - `backend/parse_html.py`
+  - `backend/document.py`
+  - `backend/main.py`
+- Files changed by Codex during review/correction:
+  - `backend/main.py`
+  - `action-log.md`
+- Review result: accepted after correction.
+- OpenCode changes accepted:
+  - Parser now always generates backend node IDs and stores native HTML/SVG IDs in `style["id"]`.
+  - Parent/child links now use generated backend IDs instead of native IDs.
+  - Document-store HTML export emits non-SVG native `id="..."` separately from CSS style output.
+  - JSX export mirrors the non-SVG native ID split while preserving generated `data-paper-node` values.
+  - Save/open Paper HTML path restores native DOM IDs into `style["id"]` while preserving backend IDs from `data-paper-node`.
+- Correction applied by Codex:
+  - Updated `validate_svg` reference parsing so bare `#...` values are treated as references only for `href` and `xlinkHref`, preventing hex colors such as `fill="#111827"` from being reported as missing refs.
+- Verification:
+  - `python3 -m py_compile backend/parse_html.py backend/document.py backend/main.py` passed.
+  - `git diff --check` passed.
+  - Independent focused checks passed: 27 passed, 0 failed.
+  - Covered generated unique backend IDs, duplicate native SVG IDs preserved in `style["id"]`, generated parent/children links, `get_tree_summary`, `get_children`, `export_html`, `get_page_html`, `get_jsx`, `update_svg_attributes`, `validate_svg`, save/open preservation, and unchanged non-SVG style export except native ID splitting.
+
+### Task 32 Review - SVG Pipeline Direction / Pre-Diagnosis Context
+
+- Actor: Codex
+- Summary: Reconstructed missing planner log entry for Task 32 from session context. This task belongs to the transition away from Paper parity work and toward the VibeDesignLocalMCP agent-first SVG pipeline.
+- Files reviewed:
+  - `/root/my-project/codex_p/codex_vibe-design04.md`
+  - `/tmp/codex-planner-session-3-handoff.md`
+  - `architecture.md`
+  - `to-do.md`
+  - `action-log.md`
+- Review result: accepted as planning/context alignment.
+- Decision captured:
+  - Continue with VibeDesignLocalMCP as the open-source Paper alternative target.
+  - Keep planner/builder split: Codex assigns/reviews, OpenCode implements.
+  - Do not revive broken manual rectangle/shape toolbar tools.
+  - Keep SVG/shape pipeline agent-first: agents create SVG/HTML, backend preserves inspectable nodes/attrs, and future edits use targeted MCP tools.
+  - Defer Design Mode implementation until select/layer/node identity is trustworthy.
+- Notes:
+  - This entry was added later because the original Task 32 action-log entry was missing.
+
+### Task 33 Review - Diagnose Current SVG Representation Before Implementation
+
+- Actor: Codex
+- Summary: Reconstructed missing planner/review log entry for Task 33 from OpenCode report and session context.
+- Files reviewed or identified as important context:
+  - `backend/parse_html.py`
+  - `backend/document.py`
+  - `backend/main.py`
+  - `frontend/src/canvas/Element.tsx`
+  - `frontend/src/panels/LayerPanel.tsx`
+  - `frontend/src/store/editorStore.ts`
+  - `frontend/src/types.ts`
+  - `/root/my-project/VibeDesignLocalMCP_task.md`
+- Review result: accepted as diagnosis.
+- Key findings accepted:
+  - SVG parse/store and frontend rendering/selection were mostly functional.
+  - Existing pipeline handled roughly 20 SVG tag types with stable IDs, correct nesting, and exact selection.
+  - Critical breakage was backend export: `_render_element` and `_render_jsx_element` emitted SVG attributes such as `fill`, `d`, `cx`, and `viewBox` as CSS properties instead of native XML/React attributes.
+- Resulting next task:
+  - Task 34 was assigned to fix `_render_element` and `_render_jsx_element` so SVG attrs emit as XML/JSX attributes for SVG tags.
+- Notes:
+  - This entry was added later because the original Task 33 action-log entry was missing.

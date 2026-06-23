@@ -121,3 +121,289 @@ This is the core loop to test on PC.
 - Add a small regression test suite for parser/document/export/MCP flows.
 - Add image export.
 - Add PDF export near the end, after browser dependency strategy is clear.
+
+---
+
+# VibeDesignLocalMCP Checkpoint - Tasks 19-32
+
+Date: 2026-06-23
+
+## Status
+
+The last serious PC test was around Task 19. Since then, Tasks 20-32 changed enough frontend and backend behavior that a new PC checkpoint test is recommended before continuing deeper into Design Mode or additional SVG/frontend work.
+
+This checkpoint does not mean the frontend is complete. It means the project has moved from backend editing repair into frontend safety, selection identity, inspector safety, and Design Mode/SVG planning. A real PC test should verify that the app still feels usable after the safety changes.
+
+## What Changed Since Task 19
+
+- REST routes now return clearer HTTP errors for failed backend mutations instead of silently returning `200 OK`.
+- `update_styles` routing was corrected so page/artboard updates and element CSS updates do not steal keys from each other.
+- Broken manual creation tools were disabled from normal UI access:
+  - text
+  - frame
+  - rectangle
+- Cursor/select mode was made selection-only.
+- Manual selected-element resize handles and resize mutation paths were removed.
+- Startup viewport behavior now focuses the current page once, with fit-all fallback for invalid current pages.
+- Canvas, layer panel, and store selection behavior were tightened around one selection contract:
+  - element selection clears artboard selection
+  - artboard selection clears element selection
+  - empty canvas click clears both
+- Layer selection and canvas selection now use the same `selectElement()` path.
+- Layer ancestor expansion now keeps selected nested nodes visible.
+- Selection outline behavior was fixed for flow/static elements by adding render-only positioning context when needed.
+- The right inspector now resolves selected elements across all pages, not only the current page.
+- The right inspector shows read-only identity metadata for selected elements/artboards.
+- Unsafe element layout inputs in the inspector were disabled.
+- Missing/stale selected node IDs now show an explicit missing-selection state.
+- Dead draw/drag/mutation paths were removed from `Canvas.tsx`.
+- Artboard interaction was diagnosed as acceptable for V1:
+  - content click selects artboard
+  - header drag moves artboard
+  - handles resize artboard
+  - normal content clicks do not move or resize
+- Design Mode V1 architecture was documented:
+  - fixed right-panel prompt
+  - backend endpoint
+  - tmux bridge into a persistent agent session
+  - existing MCP tools perform edits
+  - frontend polling/revision detects completion
+- Skills were explicitly deferred until after V1 core.
+- SVG pipeline direction was clarified as agent-first, with SVG-specific tools planned after diagnosis.
+
+## Files Touched In This Checkpoint Range
+
+- `backend/main.py`
+- `frontend/src/App.tsx`
+- `frontend/src/bridge/api.ts`
+- `frontend/src/canvas/Canvas.tsx`
+- `frontend/src/canvas/Element.tsx`
+- `frontend/src/canvas/viewport.ts`
+- `frontend/src/panels/LayerPanel.tsx`
+- `frontend/src/panels/PropertyPanel.tsx`
+- `frontend/src/store/editorStore.ts`
+- `frontend/src/toolbar/Toolbar.tsx`
+- `architecture.md`
+- `to-do.md`
+- `action-log.md`
+- `design-mode.md`
+
+## PC Test Recommendation
+
+Yes, test on PC now.
+
+The reason is not only the number of tasks. The reason is the type of changes: selection, layer sync, inspector resolution, viewport focus, disabled manual tools, and canvas cleanup all affect the human UI experience. These are exactly the kinds of changes that can pass builds but still feel wrong in a real browser.
+
+## PC Test Checklist - Tasks 19-32
+
+1. Start backend and frontend.
+2. Open the frontend in a normal desktop browser.
+3. Confirm the initial viewport focuses a valid current artboard.
+4. Confirm the Fit button still fits all artboards.
+5. Click an artboard content area and confirm the artboard selects without moving.
+6. Click empty canvas outside artboards and confirm selection clears.
+7. Click nested elements on canvas and confirm the correct layer row/inspector identity appears.
+8. Click nested layer rows and confirm the correct canvas element is selected.
+9. Confirm selected layer ancestors expand so the selected child is visible.
+10. Confirm selected flow/static elements show a visible outline.
+11. Confirm SVG child selection identity is stable, while noting SVG-native visual outline is still a known limitation.
+12. Confirm Text, Frame, and Rectangle tools are not available from the normal toolbar.
+13. Confirm `R`, `T`, and `F` shortcuts no longer activate disabled creation tools.
+14. Confirm the Select tool does not drag or mutate elements.
+15. Confirm selected element resize handles are gone.
+16. Confirm artboard header drag still moves the artboard.
+17. Confirm artboard resize handles still resize the artboard.
+18. Confirm the right inspector shows the selected node ID, name, type/tag, parent ID, children count, and owning artboard where applicable.
+19. Confirm element layout fields such as `left`, `top`, `width`, and `height` are read-only/disabled in the inspector.
+20. Confirm text editing and safe visual controls still work where they are intentionally enabled.
+21. Select elements across multiple artboards and confirm the inspector resolves the correct owning artboard.
+22. Trigger or simulate a stale/missing selection and confirm the inspector shows an explicit missing-selection warning instead of silently showing the wrong artboard.
+23. Export/read back selected content and confirm export target artboard matches the selected element's owning page.
+24. Do a short real-world agent workflow:
+    - agent creates a page with nested HTML/SVG
+    - user selects nodes in the UI
+    - agent edits by node ID using MCP
+    - frontend polling reflects the changes
+
+## Known Limitations At This Checkpoint
+
+- Frontend is not product-complete.
+- Design Mode UI and backend tmux bridge are not implemented yet.
+- SVG-native selection outline/highlight is not implemented yet.
+- Manual shape/text/frame creation tools are intentionally disabled.
+- Export/PDF polish is still future work.
+- Full automated regression coverage is still missing.
+- Accumulated uncommitted changes span many tasks, so `git diff` must be interpreted by task scope, not as one single task diff.
+
+## Recommended Next Step
+
+Run this PC checkpoint before assigning another broad frontend feature. If PC testing exposes human UI bugs, diagnose them with the established four-step protocol before implementing fixes:
+
+```text
+agent creates fresh page
+-> user uses text/manual UI path
+-> user moves/selects one element
+-> agent performs an edit
+-> compare logs and document state across all paths
+```
+
+---
+
+# VibeDesignLocalMCP Checkpoint - Tasks 32-41
+
+Date: 2026-06-23
+
+## Status
+
+Yes, test on PC now.
+
+The last PC test was around Task 19. Tasks 20-32 changed the frontend safety/selection shell. Tasks 32-41 then changed the SVG and parser identity pipeline substantially. Together, that is enough surface area that real PC/browser testing is the right next move before assigning more broad implementation work.
+
+This checkpoint still does not mean the app is complete. It means the agent-first SVG pipeline is now strong enough to validate in a real browser/workspace loop.
+
+## What Changed Since Task 32
+
+- Task 33 diagnosed the current SVG representation:
+  - parse/store and frontend SVG render were mostly functional
+  - backend export was the critical breakage
+- SVG HTML export now emits SVG attrs as native XML attributes instead of CSS style entries.
+- JSX export now emits SVG attrs as React-compatible JSX attrs instead of CSS style object entries.
+- Native SVG `id` attrs now round-trip for refs such as gradients, clip paths, masks, symbols, and text paths.
+- Canonical SVG tag names now export correctly:
+  - `linearGradient`
+  - `radialGradient`
+  - `clipPath`
+  - `foreignObject`
+  - `textPath`
+- Added `update_svg_attributes` MCP tool for direct SVG/XML attr mutation.
+- Added `foreignObject` and `textPath` tag parity across active SVG export/mutation paths.
+- Added missing textPath/text attrs:
+  - `startOffset`
+  - `textLength`
+  - `lengthAdjust`
+  - `method`
+  - `spacing`
+  - `side`
+- Added read-only `validate_svg` MCP diagnostic tool:
+  - malformed/missing `viewBox`
+  - missing refs
+  - duplicate native SVG IDs
+  - missing primitive attrs
+  - simple numeric viewBox bounds warnings
+- Parser backend node IDs are now decoupled from native HTML/SVG `id` attrs:
+  - backend node ID is generated and unique
+  - native `id` is preserved in `style["id"]`
+  - `data-paper-node` remains the backend target ID
+  - native `id="..."` still exports
+- `validate_svg` now avoids false missing-ref reports for hex colors like `fill="#111827"`.
+
+## Files Touched In This Checkpoint Range
+
+- `backend/parse_html.py`
+- `backend/document.py`
+- `backend/main.py`
+- `frontend/src/canvas/Element.tsx` (review context)
+- `frontend/src/panels/LayerPanel.tsx` (review context)
+- `frontend/src/store/editorStore.ts` (review context)
+- `frontend/src/types.ts` (review context)
+- `architecture.md`
+- `to-do.md`
+- `design-mode.md`
+- `action-log.md`
+- `action_log2.md`
+
+## PC Test Recommendation
+
+Yes. Run a PC checkpoint test before assigning more backend/frontend features.
+
+Priority is not visual polish. Priority is verifying the end-to-end agent loop:
+
+```text
+agent writes HTML/SVG
+-> backend parses native layers
+-> UI renders selectable nodes
+-> agent inspects IDs/tree/SVG diagnostics
+-> agent edits by generated backend node ID
+-> clean HTML/JSX export preserves native IDs and refs
+```
+
+## PC Test Checklist - Tasks 32-41
+
+1. Start backend and frontend on PC.
+2. Open the frontend in a normal desktop browser.
+3. Create a fresh artboard/page through MCP.
+4. Use `write_html` to add a mixed HTML/SVG sample:
+   - a normal HTML wrapper with native `id="hero"`
+   - inline `<svg id="chart" viewBox="0 0 100 100">`
+   - `<defs>` with `linearGradient id="grad-a"`
+   - `<rect fill="url(#grad-a)">`
+   - `<clipPath id="clip-a">`
+   - `<textPath href="#path-a" startOffset="50%">`
+   - two SVG nodes intentionally sharing the same native id for duplicate-id validation
+5. Confirm the frontend renders the SVG.
+6. Select the SVG root and child SVG nodes where the current frontend allows it.
+7. Confirm layer panel and inspector show generated backend node IDs, not native HTML/SVG IDs.
+8. Run `get_tree_summary` and confirm tree IDs are generated backend IDs.
+9. Run `get_node_info` on SVG child nodes and confirm `style["id"]` contains native SVG IDs where applicable.
+10. Run `get_children` on the SVG root and confirm children are generated backend IDs.
+11. Run `get_svg_summary` and confirm primitives are visible.
+12. Run `validate_svg` on the SVG root:
+    - duplicate native SVG IDs should report `duplicate_svg_id`
+    - valid `url(#grad-a)` refs should not report missing refs
+    - intentionally missing refs should report `missing_ref_target`
+13. Use `update_svg_attributes` on a generated backend node ID:
+    - change `rect` `fill`, `x`, `width`, or `rx`
+    - change `path` `d`
+    - change `textPath` `startOffset`
+14. Confirm frontend visually updates after backend poll/sync.
+15. Run `get_page_html` and verify:
+    - `data-paper-node` is generated backend ID
+    - native `id="..."` is preserved
+    - SVG attrs are XML attrs, not CSS style entries
+    - non-SVG native `id` does not appear as CSS `id: ...`
+16. Run `get_jsx` and verify:
+    - SVG attrs are JSX props
+    - `strokeWidth`, `viewBox`, `startOffset` use camelCase
+    - non-SVG native `id` is a prop, not inside `style={{ }}`
+17. Save and reopen the document.
+18. After reopen, confirm:
+    - backend node IDs are still generated IDs from `data-paper-node`
+    - native IDs remain in exported output
+    - duplicate backend node IDs are not introduced
+    - `validate_svg` still sees duplicate native SVG IDs where intentionally present
+19. Do one short real-world agent workflow:
+    - ask the agent to create a small chart/card/report section
+    - inspect it with tree/SVG tools
+    - patch one SVG element by ID
+    - validate and export
+20. If manual UI bugs appear, stop and use the four-step diagnosis protocol before assigning fixes.
+
+## Known Limitations At This Checkpoint
+
+- Frontend is still not product-complete.
+- Design Mode UI and tmux bridge are documented but not implemented.
+- SVG-native visual selection/highlight may still be limited.
+- Manual shape/text/frame creation tools remain intentionally disabled.
+- `export_pdf` remains postponed.
+- Full regression tests are still not part of the repo.
+- Accumulated uncommitted changes still span many tasks, so `git diff` must be read by task scope.
+
+## Recommended Next Step
+
+Run the PC test now.
+
+If the PC test passes, the project can continue with the next planned layer:
+
+- either Design Mode V1 plumbing,
+- or focused frontend selection/highlight polish,
+- or a small automated regression test suite for the new SVG/parser/export pipeline.
+
+If the PC test fails, do not jump straight into fixes. Use the required diagnostic sequence:
+
+```text
+agent creates fresh page
+-> user uses one manual UI action
+-> user moves/selects one element
+-> agent edits same page
+-> compare backend document ID, page ID, node ID, coordinates, and styles
+```

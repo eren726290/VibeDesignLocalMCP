@@ -10,7 +10,7 @@ function getActiveDocId(): string {
   return localStorage.getItem('paper-active-doc') || 'default';
 }
 
-function setActiveDocId(id: string) {
+export function setActiveDocId(id: string) {
   localStorage.setItem('paper-active-doc', id);
 }
 
@@ -163,6 +163,7 @@ declare global {
       setScreenshotData: (docId: string, data: string) => Promise<unknown>;
       setCurrentPage: (docId: string, index: number) => Promise<unknown>;
       getCurrentDocId: () => string;
+      setActiveDocId: (id: string) => void;
       switchDocument: (id: string) => void;
     };
   }
@@ -185,5 +186,6 @@ export const bridge = {
   setScreenshotData,
   setCurrentPage,
   getCurrentDocId,
+  setActiveDocId,
   switchDocument,
 };

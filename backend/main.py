@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -15,6 +15,46 @@ from fastapi.responses import JSONResponse
 # followed by letters, digits, _, or $. Used to decide whether a style key
 # can be emitted bare in a JSX object literal or must be double-quoted.
 _JSX_IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+
+# Canonical SVG tag names for export (BeautifulSoup lowercases all
+# tags during parse; these maps restore correct casing in output).
+_SVG_TAG_CANONICAL = {
+    "lineargradient": "linearGradient",
+    "radialgradient": "radialGradient",
+    "clippath": "clipPath",
+    "foreignobject": "foreignObject",
+    "textpath": "textPath",
+}
+
+# SVG tags that must emit attributes as JSX element props / HTML XML attrs.
+_SVG_TAGS = {
+    "svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline",
+    "polygon", "text", "tspan", "defs", "lineargradient", "radialgradient",
+    "stop", "clippath", "mask", "pattern", "use", "image", "symbol",
+    "foreignobject", "textpath",
+}
+
+# SVG attribute keys stored in style dict that should be emitted as
+# native JSX/XML attributes on SVG elements.  Sync with parse_html.py::svg_attrs.
+_SVG_ATTRS = {
+    "id",
+    "fill", "fillRule", "fillOpacity", "floodOpacity",
+    "stroke", "strokeWidth", "strokeLinecap", "strokeLinejoin",
+    "strokeDasharray", "strokeOpacity", "strokeMiterlimit", "strokeDashoffset",
+    "opacity", "clipPath", "clipRule",
+    "r", "rx", "ry", "cx", "cy", "x", "y", "x1", "y1", "x2", "y2",
+    "width", "height",
+    "d", "points", "pathLength",
+    "viewBox", "preserveAspectRatio", "xmlns",
+    "textAnchor", "dominantBaseline", "fontFamily", "fontSize", "fontWeight",
+    "letterSpacing", "textDecoration", "fontStyle", "fontVariant",
+    "startOffset", "textLength", "lengthAdjust", "method", "spacing", "side",
+    "offset", "stopColor", "stopOpacity",
+    "gradientUnits", "spreadMethod", "gradientTransform",
+    "patternUnits", "patternContentUnits",
+    "clipPathUnits", "maskUnits", "maskContentUnits",
+    "transform", "href", "xlinkHref",
+}
 
 # Document Store
 from document import DocumentStore, Page, Document
@@ -66,6 +106,8 @@ async def handle_mcp_tool(name: str, arguments: dict, doc_id: str) -> dict:
         return await _duplicate_nodes(doc_id, arguments)
     elif name == "update_styles":
         return await _update_styles(doc_id, arguments)
+    elif name == "update_svg_attributes":
+        return await _update_svg_attributes(doc_id, arguments)
     elif name == "set_text_content":
         return await _set_text_content(doc_id, arguments)
     elif name == "rename_nodes":
@@ -104,6 +146,8 @@ async def handle_mcp_tool(name: str, arguments: dict, doc_id: str) -> dict:
         return await _get_overflow_report(doc_id, arguments)
     elif name == "get_svg_summary":
         return await _get_svg_summary(doc_id, arguments)
+    elif name == "validate_svg":
+        return await _validate_svg(doc_id, arguments)
     else:
         return {"error": f"Unknown tool: {name}"}
 
@@ -537,6 +581,261 @@ def _build_svg_hints(counts):
     return hints
 
 
+# =============================================================================
+# SVG validation helpers
+# =============================================================================
+
+
+def _find_ancestor_svg(page, node_id):
+    """Walk parentId chain upward to find nearest ancestor SVG element."""
+    seen = set()
+    current = node_id
+    while current and current not in seen:
+        seen.add(current)
+        el = next((candidate for candidate in page.elements if candidate.get("id") == current), None)
+        if not el:
+            return None
+        if el.get("tag") == "svg":
+            return el
+        current = el.get("parentId")
+    return None
+
+
+def _parse_viewbox(v):
+    """Parse SVG viewBox into (min_x, min_y, width, height) or None."""
+    if not v:
+        return None
+    parts = str(v).strip().split()
+    if len(parts) != 4:
+        return None
+    try:
+        return (float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]))
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_simple_number(v):
+    """Parse a simple numeric/px value to float. Returns None for percentages and complex values."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip()
+    if s.endswith("px"):
+        s = s[:-2]
+    elif s.endswith("%"):
+        return None
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _check_ref_url(value, allow_bare_hash=False):
+    """Extract referenced ID from url(#id), and optionally bare #id, patterns."""
+    if not value:
+        return None
+    s = str(value).strip()
+    m = re.match(r'^url\(["\']?#([^)"\']+)["\']?\)$', s)
+    if m:
+        return m.group(1)
+    if allow_bare_hash:
+        m = re.match(r'^#(.+)$', s)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _svg_subtree_elements(page, svg_root):
+    """Collect one SVG subtree by parentId links without collapsing duplicate element IDs."""
+    out = [svg_root]
+    queued = [svg_root]
+    seen_objects = {id(svg_root)}
+    while queued:
+        parent = queued.pop(0)
+        parent_id = parent.get("id")
+        for el in page.elements:
+            if el.get("parentId") == parent_id and id(el) not in seen_objects:
+                out.append(el)
+                queued.append(el)
+                seen_objects.add(id(el))
+    return out
+
+
+def _svg_ref_id(el):
+    """Native SVG reference identity, falling back to backend node id."""
+    style_id = (el.get("style") or {}).get("id")
+    return style_id or el.get("id")
+
+
+def _svg_issue(severity, code, node_id, tag, message, attr=None, value=None):
+    item = {
+        "severity": severity,
+        "code": code,
+        "nodeId": node_id or "",
+        "tag": tag or "",
+        "message": message,
+    }
+    if attr is not None:
+        item["attr"] = attr
+    if value is not None:
+        item["value"] = value
+    return item
+
+
+def _validate_svg_root(page, svg_root):
+    """Run all validation checks on one SVG subtree. Returns (issues, warnings)."""
+    issues = []
+    warnings = []
+    style = svg_root.get("style", {}) or {}
+
+    all_in_subtree = _svg_subtree_elements(page, svg_root)
+    descendants = [el for el in all_in_subtree if el is not svg_root]
+
+    # A. SVG root checks
+    viewbox = style.get("viewBox")
+    width = style.get("width")
+    height = style.get("height")
+    if not viewbox and not width and not height:
+        warnings.append(_svg_issue(
+            "warning", "svg_missing_size", svg_root.get("id"), "svg",
+            "SVG has no viewBox and no explicit width/height; may render at 0x0",
+        ))
+
+    parsed_vb = _parse_viewbox(viewbox)
+    if viewbox and not parsed_vb:
+        issues.append(_svg_issue(
+            "error", "invalid_viewbox", svg_root.get("id"), "svg",
+            f"viewBox '{viewbox}' is malformed (expected four numbers)",
+            attr="viewBox", value=viewbox,
+        ))
+
+    # B. Reference checks
+    native_ids = set()
+    native_to_el = {}
+    dupes = set()
+    for el in all_in_subtree:
+        sid = _svg_ref_id(el)
+        if sid:
+            if sid in native_to_el:
+                dupes.add(sid)
+            else:
+                native_to_el[sid] = el.get("id", "")
+            native_ids.add(sid)
+
+    for dup_id in sorted(dupes):
+        issues.append(_svg_issue(
+            "error", "duplicate_svg_id", svg_root.get("id"), "svg",
+            f"Duplicate native SVG id '{dup_id}' found inside SVG subtree",
+            attr="id", value=dup_id,
+        ))
+
+    ref_attrs = ["fill", "stroke", "clipPath", "mask", "filter",
+                 "markerStart", "markerMid", "markerEnd",
+                 "href", "xlinkHref"]
+    for el in all_in_subtree:
+        el_style = el.get("style", {}) or {}
+        el_id = el.get("id", "")
+        el_tag = el.get("tag", "")
+        for attr in ref_attrs:
+            val = el_style.get(attr)
+            if not val:
+                continue
+            ref_id = _check_ref_url(val, allow_bare_hash=attr in ("href", "xlinkHref"))
+            if ref_id and ref_id not in native_ids:
+                issues.append(_svg_issue(
+                    "error", "missing_ref_target", el_id, el_tag,
+                    f"{attr} references missing SVG id '{ref_id}'",
+                    attr=attr, value=val,
+                ))
+
+    # C. Required attr checks
+    for el in descendants:
+        el_style = el.get("style", {}) or {}
+        el_id = el.get("id", "")
+        el_tag = el.get("tag", "")
+        if el_tag == "path" and not el_style.get("d"):
+            warnings.append(_svg_issue(
+                "warning", "path_missing_d", el_id, el_tag,
+                "<path> is missing 'd' attribute",
+            ))
+        if el_tag == "rect":
+            if not el_style.get("width") or not el_style.get("height"):
+                warnings.append(_svg_issue(
+                    "warning", "rect_missing_size", el_id, el_tag,
+                    "<rect> is missing 'width' and/or 'height'",
+                ))
+        if el_tag == "circle" and not el_style.get("r"):
+            warnings.append(_svg_issue(
+                "warning", "circle_missing_radius", el_id, el_tag,
+                "<circle> is missing 'r' attribute",
+            ))
+        if el_tag == "line":
+            if not (el_style.get("x1") and el_style.get("y1")
+                    and el_style.get("x2") and el_style.get("y2")):
+                warnings.append(_svg_issue(
+                    "warning", "line_missing_endpoint", el_id, el_tag,
+                    "<line> is missing endpoint attributes (x1, y1, x2, y2)",
+                ))
+        if el_tag in ("polyline", "polygon") and not el_style.get("points"):
+            warnings.append(_svg_issue(
+                "warning", "points_missing", el_id, el_tag,
+                f"<{el_tag}> is missing 'points' attribute",
+            ))
+        if el_tag == "image":
+            if not el_style.get("href") and not el_style.get("xlinkHref"):
+                warnings.append(_svg_issue(
+                    "warning", "image_missing_href", el_id, el_tag,
+                    "<image> is missing 'href' or 'xlink:href'",
+                ))
+        if el_tag == "textpath":
+            if not el_style.get("href") and not el_style.get("xlinkHref"):
+                warnings.append(_svg_issue(
+                    "warning", "textpath_missing_href", el_id, el_tag,
+                    "<textPath> is missing 'href' or 'xlink:href'",
+                ))
+
+    # D. Basic bounds/viewBox checks (best-effort, numeric only)
+    if parsed_vb:
+        vbx, vby, vbw, vbh = parsed_vb
+        for el in descendants:
+            el_style = el.get("style", {}) or {}
+            el_id = el.get("id", "")
+            el_tag = el.get("tag", "")
+            outside = False
+            if el_tag == "rect":
+                rx = _parse_simple_number(el_style.get("x"))
+                ry = _parse_simple_number(el_style.get("y"))
+                rw = _parse_simple_number(el_style.get("width"))
+                rh = _parse_simple_number(el_style.get("height"))
+                if rx is not None and ry is not None and rw is not None and rh is not None:
+                    if rx + rw < vbx or rx > vbx + vbw or ry + rh < vby or ry > vby + vbh:
+                        outside = True
+            elif el_tag == "circle":
+                ccx = _parse_simple_number(el_style.get("cx"))
+                ccy = _parse_simple_number(el_style.get("cy"))
+                cr = _parse_simple_number(el_style.get("r"))
+                if ccx is not None and ccy is not None and cr is not None:
+                    if ccx + cr < vbx or ccx - cr > vbx + vbw or ccy + cr < vby or ccy - cr > vby + vbh:
+                        outside = True
+            elif el_tag == "line":
+                lx1 = _parse_simple_number(el_style.get("x1"))
+                ly1 = _parse_simple_number(el_style.get("y1"))
+                lx2 = _parse_simple_number(el_style.get("x2"))
+                ly2 = _parse_simple_number(el_style.get("y2"))
+                if lx1 is not None and ly1 is not None and lx2 is not None and ly2 is not None:
+                    if (lx1 < vbx and lx2 < vbx) or (lx1 > vbx + vbw and lx2 > vbx + vbw) \
+                       or (ly1 < vby and ly2 < vby) or (ly1 > vby + vbh and ly2 > vby + vbh):
+                        outside = True
+            if outside:
+                warnings.append(_svg_issue(
+                    "warning", "outside_viewbox", el_id, el_tag,
+                    f"<{el_tag}> appears to be outside the SVG viewBox",
+                ))
+
+    return issues, warnings
+
+
 def _format_el_line(el):
     """One-line summary string for an element."""
     tag = el.get("tag", "div")
@@ -818,11 +1117,6 @@ async def _update_styles(doc_id: str, args: dict) -> dict:
     if not doc_id:
         doc_id = "default"
 
-    # Separate artboard-level props (x/y/backgroundColor/width/height) from CSS styles
-    artboard_keys = {"x", "y", "backgroundColor", "width", "height", "name"}
-    artboard_updates = {k: v for k, v in styles.items() if k in artboard_keys}
-    css_styles = {k: v for k, v in styles.items() if k not in artboard_keys}
-
     doc = doc_store.documents.get(doc_id) or doc_store.documents.get("default")
     if not doc:
         return {"error": "Document not found"}
@@ -831,26 +1125,74 @@ async def _update_styles(doc_id: str, args: dict) -> dict:
     for node_id in node_ids:
         # Check if this is an artboard (page) ID
         is_artboard = any(p.id == node_id for p in doc.pages)
-        if is_artboard and artboard_updates:
-            # Artboard path: never pass removeStyleKeys here (per spec).
-            result = doc_store.update_page(doc_id, node_id, artboard_updates)
-            if result.get("success"):
-                updated.append({"id": node_id, "type": "artboard", "updates": artboard_updates})
 
-        # Element path: apply style update and/or removal. Removal is a no-op
-        # for artboard IDs (the element lookup will miss), which is the
-        # correct behavior per spec.
-        if css_styles or remove_style_keys:
+        if is_artboard:
+            # Artboard path: only route known page-metadata keys
+            artboard_keys = {"x", "y", "backgroundColor", "width", "height", "name"}
+            artboard_updates = {k: v for k, v in styles.items() if k in artboard_keys}
+            if artboard_updates:
+                result = doc_store.update_page(doc_id, node_id, artboard_updates)
+                if result.get("success"):
+                    updated.append({"id": node_id, "type": "artboard", "updates": artboard_updates})
+        else:
+            # Element path: all keys are CSS styles (backgroundColor, width, height)
             payload = {}
-            if css_styles:
-                payload["style"] = css_styles
+            if styles:
+                payload["style"] = dict(styles)
             if remove_style_keys:
                 payload["removeStyleKeys"] = remove_style_keys
-            result = doc_store.update_element(doc_id, node_id, payload)
-            if result.get("success"):
-                updated.append(result["element"])
+            if payload:
+                result = doc_store.update_element(doc_id, node_id, payload)
+                if result.get("success"):
+                    updated.append(result["element"])
 
     return {"success": True, "updated": updated}
+
+
+async def _update_svg_attributes(doc_id: str, args: dict) -> dict:
+    node_id = args.get("nodeId", "")
+    attrs = args.get("attrs")
+
+    if not doc_id:
+        doc_id = "default"
+
+    doc = doc_store.documents.get(doc_id) or doc_store.documents.get("default")
+    if not doc:
+        return {"success": False, "error": "Document not found"}
+
+    if not node_id or not isinstance(node_id, str):
+        return {"success": False, "error": "nodeId is required"}
+
+    if not isinstance(attrs, dict) or not attrs:
+        return {"success": False, "error": "attrs must be a non-empty object"}
+
+    for k, v in attrs.items():
+        if not isinstance(k, str) or not k:
+            return {"success": False, "error": "Attribute keys must be non-empty strings"}
+        if v is not None and not isinstance(v, (str, int, float, bool)):
+            return {"success": False, "error": f"Invalid value for attribute '{k}': must be string, number, bool, or null"}
+
+    page, el = _resolve_node(doc, node_id)
+    if not page:
+        return {"success": False, "error": f"Node '{node_id}' not found"}
+
+    if el is None:
+        return {"success": False, "error": f"Node '{node_id}' is a page/artboard, not an SVG element"}
+
+    tag = el.get("tag") or "div"
+    if tag not in _SVG_TAGS:
+        return {"success": False, "error": f"Node '{node_id}' is not an SVG element"}
+
+    result = doc_store.update_element(doc_id, node_id, {"style": dict(attrs)})
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error", "Update failed")}
+
+    return {
+        "success": True,
+        "nodeId": node_id,
+        "updated": result["element"],
+        "attrs": attrs,
+    }
 
 
 async def _set_text_content(doc_id: str, args: dict) -> dict:
@@ -1296,6 +1638,7 @@ def _render_jsx_element(el, el_by_id, page, indent, seen, emitted):
     emitted.add(eid)
 
     tag = el.get("tag") or "div"
+    export_tag = _SVG_TAG_CANONICAL.get(tag, tag) if tag in _SVG_TAGS else tag
     el_name = el.get("name") or ""
 
     # Attributes: always emit data-paper-node and data-paper-name as JSX
@@ -1304,7 +1647,22 @@ def _render_jsx_element(el, el_by_id, page, indent, seen, emitted):
         f'data-paper-node={{{json.dumps(eid)}}} '
         f'data-paper-name={{{json.dumps(el_name)}}}'
     )
-    style_body = _jsx_style_object(el.get("style") or {})
+
+    style = el.get("style") or {}
+    if tag in _SVG_TAGS:
+        svg_style = {k: v for k, v in style.items() if k in _SVG_ATTRS}
+        css_style = {k: v for k, v in style.items() if k not in _SVG_ATTRS}
+        for k, v in svg_style.items():
+            if v is not None:
+                attrs += f' {k}={json.dumps(str(v))}'
+        style_body = _jsx_style_object(css_style)
+    else:
+        native_id = style.get("id")
+        if native_id is not None and native_id != "":
+            attrs += f' id={json.dumps(str(native_id))}'
+        css_style = {k: v for k, v in style.items() if k != "id"}
+        style_body = _jsx_style_object(css_style)
+
     if style_body:
         attrs += f' style={{{{ {style_body} }}}}'
 
@@ -1313,7 +1671,7 @@ def _render_jsx_element(el, el_by_id, page, indent, seen, emitted):
     el_text = el.get("text") or ""
 
     if not el_text and not child_ids:
-        return f"{pad}<{tag} {attrs} />"
+        return f"{pad}<{export_tag} {attrs} />"
 
     inner_chunks = []
     if el_text:
@@ -1326,7 +1684,7 @@ def _render_jsx_element(el, el_by_id, page, indent, seen, emitted):
         if line:
             inner_chunks.append(line)
     inner = "\n".join(inner_chunks)
-    return f"{pad}<{tag} {attrs}>\n{inner}\n{pad}</{tag}>"
+    return f"{pad}<{export_tag} {attrs}>\n{inner}\n{pad}</{export_tag}>"
 
 
 async def _create_artboard(doc_id: str, args: dict) -> dict:
@@ -1872,6 +2230,54 @@ async def _get_svg_summary(doc_id: str, args: dict) -> dict:
     }
 
 
+async def _validate_svg(doc_id: str, args: dict) -> dict:
+    """Validate SVG trees for common issues. Read-only — no document mutation."""
+    if not doc_id:
+        doc_id = "default"
+    doc = doc_store.documents.get(doc_id) or doc_store.documents.get("default")
+    if not doc:
+        return {"success": False, "error": "Document not found"}
+
+    page_id = args.get("pageId") or None
+    node_id = args.get("nodeId") or None
+
+    target_page, target_el, err = _resolve_diagnostic_target(doc, page_id, node_id)
+    if err:
+        return err
+
+    # Determine which SVG roots to validate
+    svg_roots = []
+    if target_el is None:
+        svg_roots = [el for el in target_page.elements if el.get("tag") == "svg"]
+    elif target_el.get("tag") == "svg":
+        svg_roots = [target_el]
+    else:
+        ancestor = _find_ancestor_svg(target_page, target_el["id"])
+        if ancestor:
+            svg_roots = [ancestor]
+        else:
+            return {"success": False, "error": f"Node '{node_id}' is not an SVG node or descendant"}
+
+    all_issues = []
+    all_warnings = []
+    for svg in svg_roots:
+        issues, warnings = _validate_svg_root(target_page, svg)
+        all_issues.extend(issues)
+        all_warnings.extend(warnings)
+
+    return {
+        "success": True,
+        "checked": len(svg_roots),
+        "issues": all_issues,
+        "warnings": all_warnings,
+        "summary": {
+            "svgCount": len(svg_roots),
+            "errorCount": len(all_issues),
+            "warningCount": len(all_warnings),
+        },
+    }
+
+
 def _kebab_to_camel(kebab: str) -> str:
     """Convert kebab-case CSS property to camelCase JS property name"""
     # Special mappings for CSS shorthand properties
@@ -1935,6 +2341,8 @@ TOOLS_LIST = [
     {"name": "get_layout_diagnostics", "description": "Report likely layout issues such as overlap, clipping, text overflow, off-artboard nodes, zero-size nodes, and missing dimensions.", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Optional page ID."}, "nodeId": {"type": "string", "description": "Optional page or element ID."}, "includeOverlaps": {"type": "boolean", "description": "Include sibling overlap checks. Default true."}, "includeText": {"type": "boolean", "description": "Include text overflow heuristic. Default true."}}}},
     {"name": "get_overflow_report", "description": "Report nodes that overflow their parent or artboard, including overflow amounts per side.", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Optional page ID."}, "nodeId": {"type": "string", "description": "Optional page or element ID."}, "includeArtboard": {"type": "boolean", "description": "Include artboard boundary overflow checks. Default true."}, "includeParent": {"type": "boolean", "description": "Include parent boundary overflow checks. Default true."}, "minOverflow": {"type": "number", "description": "Minimum pixel overflow to report. Default 1."}}}},
     {"name": "get_svg_summary", "description": "Summarize SVG elements and primitives for text-only inspection of charts, diagrams, and icons.", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Optional page ID."}, "nodeId": {"type": "string", "description": "Optional page or element ID."}, "maxItems": {"type": "number", "description": "Maximum number of detailed items per SVG. Default 50."}}}},
+    {"name": "update_svg_attributes", "description": "Update SVG/XML attributes on an existing SVG node. Writes attrs into the node style dict so export/render paths emit them as SVG attributes.", "inputSchema": {"type": "object", "properties": {"nodeId": {"type": "string"}, "attrs": {"type": "object"}}, "required": ["nodeId", "attrs"]}},
+    {"name": "validate_svg", "description": "Validate SVG trees for missing references, malformed viewBox, missing primitive attrs, duplicate native IDs, and simple viewBox bounds issues.", "inputSchema": {"type": "object", "properties": {"pageId": {"type": "string", "description": "Optional page/artboard ID. If provided, validates SVGs on that page or constrains node lookup."}, "nodeId": {"type": "string", "description": "Optional SVG root, SVG descendant, or page/artboard ID."}}}},
 ]
 
 
@@ -2024,6 +2432,17 @@ Each artboard is independent. Design web pages by creating one artboard per sect
         return JSONResponse(content={"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32603, "message": str(e)}}, status_code=200)
 
 
+def _raise_for_store_error(result: dict) -> None:
+    if not isinstance(result, dict) or "error" not in result:
+        return
+    error = str(result.get("error") or "Unknown error")
+    lower = error.lower()
+    if "not found" in lower or "does not exist" in lower:
+        raise HTTPException(status_code=404, detail=error)
+    if "invalid" in lower or "required" in lower or "bad request" in lower or "cannot" in lower:
+        raise HTTPException(status_code=400, detail=error)
+    raise HTTPException(status_code=500, detail=error)
+
 # =============================================================================
 # Document API (used by frontend)
 # =============================================================================
@@ -2040,12 +2459,16 @@ async def api_get_document(doc_id: str):
 
 @app.post("/api/documents/{doc_id}/save")
 async def api_save_document(doc_id: str):
-    return doc_store.save_document(doc_id)
+    result = doc_store.save_document(doc_id)
+    _raise_for_store_error(result)
+    return result
 
 
 @app.post("/api/documents/{doc_id}/open")
 async def api_open_document(doc_id: str, file_path: str):
-    return doc_store.open_document(doc_id, file_path)
+    result = doc_store.open_document(doc_id, file_path)
+    _raise_for_store_error(result)
+    return result
 
 
 @app.patch("/api/documents/{doc_id}/current-page")
@@ -2059,12 +2482,16 @@ async def api_set_current_page(doc_id: str, body: dict):
 
 @app.post("/api/documents/{doc_id}/pages")
 async def api_create_page(doc_id: str, page: dict):
-    return doc_store.create_page(doc_id, page)
+    result = doc_store.create_page(doc_id, page)
+    _raise_for_store_error(result)
+    return result
 
 
 @app.delete("/api/documents/{doc_id}/pages/{page_id}")
 async def api_delete_page(doc_id: str, page_id: str):
-    return doc_store.delete_page(doc_id, page_id)
+    result = doc_store.delete_page(doc_id, page_id)
+    _raise_for_store_error(result)
+    return result
 
 
 @app.put("/api/documents/{doc_id}/pages/{page_id}")
@@ -2072,10 +2499,13 @@ async def api_update_page(doc_id: str, page_id: str, updates: dict):
     try:
         result = doc_store.update_page(doc_id, page_id, updates)
         print(f"[update_page] doc={doc_id} page={page_id} updates={updates} → {result}")
+        _raise_for_store_error(result)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[update_page] ERROR doc={doc_id} page={page_id}: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/documents/{doc_id}/elements")
@@ -2083,10 +2513,13 @@ async def api_create_element(doc_id: str, element: dict):
     try:
         result = doc_store.create_element(doc_id, element)
         print(f"[create_element] doc={doc_id} element_id={element.get('id')} → {result}")
+        _raise_for_store_error(result)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[create_element] ERROR doc={doc_id}: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.put("/api/documents/{doc_id}/elements/{element_id}")
@@ -2094,25 +2527,34 @@ async def api_update_element(doc_id: str, element_id: str, updates: dict):
     try:
         result = doc_store.update_element(doc_id, element_id, updates)
         print(f"[update_element] doc={doc_id} element={element_id} updates={updates} → {result}")
+        _raise_for_store_error(result)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[update_element] ERROR doc={doc_id} element={element_id}: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/documents/{doc_id}/elements/{element_id}")
 async def api_delete_element(doc_id: str, element_id: str):
-    return doc_store.delete_element(doc_id, element_id)
+    result = doc_store.delete_element(doc_id, element_id)
+    _raise_for_store_error(result)
+    return result
 
 
 @app.post("/api/documents/{doc_id}/duplicate")
 async def api_duplicate_element(doc_id: str, element_id: str):
-    return doc_store.duplicate_element(doc_id, element_id)
+    result = doc_store.duplicate_element(doc_id, element_id)
+    _raise_for_store_error(result)
+    return result
 
 
 @app.post("/api/documents/{doc_id}/export")
 async def api_export_html(doc_id: str, pretty: bool = True):
-    return doc_store.export_html(doc_id, pretty)
+    result = doc_store.export_html(doc_id, pretty)
+    _raise_for_store_error(result)
+    return result
 
 
 @app.post("/api/documents/{doc_id}/export-artboards")
@@ -2120,7 +2562,9 @@ async def api_export_artboards(doc_id: str, body: dict):
     directory = body.get("directory", "")
     if not directory:
         return JSONResponse({"error": "directory is required"}, status_code=400)
-    return doc_store.export_artboards(doc_id, directory)
+    result = doc_store.export_artboards(doc_id, directory)
+    _raise_for_store_error(result)
+    return result
 
 
 @app.post("/api/documents/{doc_id}/screenshot")

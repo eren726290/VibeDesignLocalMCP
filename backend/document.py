@@ -105,6 +105,46 @@ class DocumentStore:
         "figure": "div",
     }
 
+    # Canonical SVG tag names for export (BeautifulSoup lowercases all
+    # tags during parse; these maps restore correct casing in output).
+    _SVG_TAG_CANONICAL = {
+        "lineargradient": "linearGradient",
+        "radialgradient": "radialGradient",
+        "clippath": "clipPath",
+        "foreignobject": "foreignObject",
+        "textpath": "textPath",
+    }
+
+    # Tags that must render SVG/XML attributes instead of CSS style entries.
+    _SVG_TAGS = {
+        "svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline",
+        "polygon", "text", "tspan", "defs", "lineargradient", "radialgradient",
+        "stop", "clippath", "mask", "pattern", "use", "image", "symbol",
+        "foreignobject", "textpath",
+    }
+
+    # SVG attribute keys stored in style dict that should be emitted as
+    # native XML attributes on SVG elements.  Sync with parse_html.py::svg_attrs.
+    _SVG_ATTRS = {
+        "id",
+        "fill", "fillRule", "fillOpacity", "floodOpacity",
+        "stroke", "strokeWidth", "strokeLinecap", "strokeLinejoin",
+        "strokeDasharray", "strokeOpacity", "strokeMiterlimit", "strokeDashoffset",
+        "opacity", "clipPath", "clipRule",
+        "r", "rx", "ry", "cx", "cy", "x", "y", "x1", "y1", "x2", "y2",
+        "width", "height",
+        "d", "points", "pathLength",
+        "viewBox", "preserveAspectRatio", "xmlns",
+        "textAnchor", "dominantBaseline", "fontFamily", "fontSize", "fontWeight",
+        "letterSpacing", "textDecoration", "fontStyle", "fontVariant",
+        "startOffset", "textLength", "lengthAdjust", "method", "spacing", "side",
+        "offset", "stopColor", "stopOpacity",
+        "gradientUnits", "spreadMethod", "gradientTransform",
+        "patternUnits", "patternContentUnits",
+        "clipPathUnits", "maskUnits", "maskContentUnits",
+        "transform", "href", "xlinkHref",
+    }
+
     def __init__(self):
         self.documents: dict[str, Document] = {}
         self._screenshot_data: dict[str, dict] = {}
@@ -1414,7 +1454,42 @@ class DocumentStore:
         for k, v in style.items():
             if v is not None:
                 parts.append(f"{to_css_property(str(k))}: {v}")
+        if not parts:
+            return ""
         return f' style="{html.escape("; ".join(parts))}"'
+
+    @staticmethod
+    def _native_id_attr(style: dict) -> str:
+        """Emit native HTML/SVG id attribute from style storage, if present."""
+        native_id = (style or {}).get("id")
+        if native_id is None or native_id == "":
+            return ""
+        return f' id="{html.escape(str(native_id), quote=True)}"'
+
+    @staticmethod
+    def _style_to_svg_attrs(svg_style: dict) -> str:
+        """Convert SVG style dict entries to HTML element attribute string.
+
+        Emits entries as ``key="value"`` pairs suitable for SVG/XML attributes.
+        General rule: camelCase → kebab-case.
+        Exceptions: ``viewBox`` and ``preserveAspectRatio`` remain unchanged;
+        ``xlinkHref`` becomes ``xlink:href``.
+        """
+        if not svg_style:
+            return ""
+
+        def to_svg_attr(name: str) -> str:
+            if name == "xlinkHref":
+                return "xlink:href"
+            if name in ("viewBox", "preserveAspectRatio"):
+                return name
+            return "".join(f"-{ch.lower()}" if ch.isupper() else ch for ch in name)
+
+        parts = []
+        for k, v in svg_style.items():
+            if v is not None:
+                parts.append(f'{to_svg_attr(str(k))}="{html.escape(str(v), quote=True)}"')
+        return " " + " ".join(parts)
 
     def _render_element(self, el: dict, elements_by_id: dict, indent: str, indent_step: str, nl: str, _seen: set = None) -> str:
         """Recursively render element and children, walking children array with cycle detection."""
@@ -1426,10 +1501,19 @@ class DocumentStore:
         _seen.add(el_id)
 
         tag = el.get("tag", "div")
+        export_tag = self._SVG_TAG_CANONICAL.get(tag, tag) if tag in self._SVG_TAGS else tag
         text = html.escape(el.get("text", "") or "")
-        style_attr = self._style_to_attr(el.get("style", {}))
         el_name = el.get("name", "")
         attrs = f'data-paper-node="{html.escape(el_id)}" data-paper-name="{html.escape(el_name, quote=True)}"'
+
+        style = el.get("style", {})
+        if tag in self._SVG_TAGS:
+            svg_style = {k: v for k, v in style.items() if k in self._SVG_ATTRS}
+            css_style = {k: v for k, v in style.items() if k not in self._SVG_ATTRS}
+            extra = self._style_to_svg_attrs(svg_style) + self._style_to_attr(css_style)
+        else:
+            css_style = {k: v for k, v in style.items() if k != "id"}
+            extra = self._native_id_attr(style) + self._style_to_attr(css_style)
 
         children_html = ""
         for child_id in el.get("children", []):
@@ -1438,7 +1522,7 @@ class DocumentStore:
                 children_html += self._render_element(child, elements_by_id, indent + indent_step, indent_step, nl, _seen)
 
         inner = text + children_html
-        return f'{indent}<{tag} {attrs}{style_attr}>{inner}</{tag}>{nl}'
+        return f'{indent}<{export_tag} {attrs}{extra}>{inner}</{export_tag}>{nl}'
 
     def _doc_to_response(self, doc: Document) -> dict:
         """Convert document to API response"""
@@ -1642,6 +1726,9 @@ class DocumentStore:
         el_id = tag["data-paper-node"]
         tag_name = tag.name
         style = self._parse_css_style(tag.get("style", ""))
+        native_id = tag.get("id")
+        if native_id:
+            style["id"] = native_id
 
         from bs4 import Comment
         direct_strings = [s for s in tag.contents if isinstance(s, str) and not isinstance(s, Comment)]

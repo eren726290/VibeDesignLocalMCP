@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useCallback } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import type { Element as ElementType } from '../types';
 
@@ -8,25 +8,7 @@ interface ElementProps {
   isRoot?: boolean;
 }
 
-// Resize handle positions
-type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
-
-const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
-
-const HANDLE_STYLE: Record<Handle, React.CSSProperties> = {
-  nw: { top: -4, left: -4, cursor: 'nw-resize' },
-  n: { top: -4, left: '50%', transform: 'translateX(-50%)', cursor: 'n-resize' },
-  ne: { top: -4, right: -4, cursor: 'ne-resize' },
-  e: { top: '50%', right: -4, transform: 'translateY(-50%)', cursor: 'e-resize' },
-  se: { bottom: -4, right: -4, cursor: 'se-resize' },
-  s: { bottom: -4, left: '50%', transform: 'translateX(-50%)', cursor: 's-resize' },
-  sw: { bottom: -4, left: -4, cursor: 'sw-resize' },
-  w: { top: '50%', left: -4, transform: 'translateY(-50%)', cursor: 'w-resize' },
-};
-
 export const Element = React.memo(function Element({ element, children, isRoot }: ElementProps) {
-  const elementRef = useRef<HTMLElement>(null);
-
   const selection = useEditorStore((s) => s.selection?.nodeId === element.id);
   const isFrame = element.type === 'frame';
   const isSvg = [
@@ -48,14 +30,21 @@ export const Element = React.memo(function Element({ element, children, isRoot }
      ((styleLeft !== undefined && styleLeft !== '0px' && styleLeft !== '0') ||
       (styleTop !== undefined && styleTop !== '0px' && styleTop !== '0')));
 
-  const hasText = element.text !== undefined && element.text !== null && element.text !== '';
-  // Needs a stacking context if: frame, AI explicitly absolute, or has text (block element)
-  const isPositioned = isFrame || origPos === 'absolute' || origPos === 'fixed' || hasExplicitAbsolute || hasText;
+  // True when the element has no usable CSS positioning context and would be static flow.
+  // In that case we inject position:relative at render time so the selection outline
+  // (position:absolute; inset:0) stays contained inside this element.
+  // This is a render-only change — it is never written to the store or backend.
+  const needsSelectionPositionContext =
+    !isSvg &&
+    (!origPos || origPos === 'static') &&
+    !hasExplicitAbsolute &&
+    !isFrame &&
+    !isRoot;
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    const { setSelection, expandToNode } = useEditorStore.getState();
-    setSelection({
+    const { selectElement, expandToNode } = useEditorStore.getState();
+    selectElement({
       nodeId: element.id,
       x: parseFloat(element.style.left || '0'),
       y: parseFloat(element.style.top || '0'),
@@ -75,72 +64,6 @@ export const Element = React.memo(function Element({ element, children, isRoot }
       }
     }
   }, [element.id, element.text]);
-
-  const resizingRef = useRef<{
-    handle: Handle;
-    startMX: number; startMY: number;
-    startW: number; startH: number;
-    startElX: number; startElY: number;
-  } | null>(null);
-
-  const handleResizeMouseDown = useCallback((e: React.MouseEvent, handle: Handle) => {
-    e.stopPropagation();
-    e.preventDefault();
-    resizingRef.current = {
-      handle,
-      startMX: e.clientX,
-      startMY: e.clientY,
-      startW: parseFloat(element.style.width || '100'),
-      startH: parseFloat(element.style.height || '100'),
-      startElX: parseFloat(styleLeft || '0'),
-      startElY: parseFloat(styleTop || '0'),
-    };
-    window.addEventListener('mousemove', handleResizeMove);
-    window.addEventListener('mouseup', handleResizeEnd);
-  }, [element.style.width, element.style.height]);
-
-  const handleResizeMove = useCallback((e: MouseEvent) => {
-    const r = resizingRef.current;
-    if (!r || !elementRef.current) return;
-    const scale = useEditorStore.getState().transform.scale;
-    const dx = (e.clientX - r.startMX) / scale;
-    const dy = (e.clientY - r.startMY) / scale;
-
-    let newW = r.startW, newH = r.startH, newX = r.startElX, newY = r.startElY;
-    if (r.handle.includes('e')) newW = Math.max(20, r.startW + dx);
-    if (r.handle.includes('s')) newH = Math.max(20, r.startH + dy);
-    if (r.handle.includes('w')) { newW = Math.max(20, r.startW - dx); newX = r.startElX + r.startW - newW; }
-    if (r.handle.includes('n')) { newH = Math.max(20, r.startH - dy); newY = r.startElY + r.startH - newH; }
-
-    // Update DOM directly — no store, no disk write during drag
-    elementRef.current!.style.width = `${newW}px`;
-    elementRef.current!.style.height = `${newH}px`;
-    elementRef.current!.style.left = `${newX}px`;
-    elementRef.current!.style.top = `${newY}px`;
-  }, []);
-
-  const handleResizeEnd = useCallback((e: MouseEvent) => {
-    const r = resizingRef.current;
-    resizingRef.current = null;
-    window.removeEventListener('mousemove', handleResizeMove);
-    window.removeEventListener('mouseup', handleResizeEnd);
-    if (!r) return;
-
-    const scale = useEditorStore.getState().transform.scale;
-    const dx = (e.clientX - r.startMX) / scale;
-    const dy = (e.clientY - r.startMY) / scale;
-
-    let newW = r.startW, newH = r.startH, newX = r.startElX, newY = r.startElY;
-    if (r.handle.includes('e')) newW = Math.max(20, r.startW + dx);
-    if (r.handle.includes('s')) newH = Math.max(20, r.startH + dy);
-    if (r.handle.includes('w')) { newW = Math.max(20, r.startW - dx); newX = r.startElX + r.startW - newW; }
-    if (r.handle.includes('n')) { newH = Math.max(20, r.startH - dy); newY = r.startElY + r.startH - newH; }
-
-    // Sync to store + backend once on mouseup (with pause/resume)
-    useEditorStore.getState().updateElement(element.id, {
-      style: { ...element.style, width: `${newW}px`, height: `${newH}px`, left: `${newX}px`, top: `${newY}px` },
-    });
-  }, [element.id, element.style]);
 
   // SVG attributes live in element.style (stored by parse_html.py _collect_attrs).
   // For SVG elements, they must be passed as DOM attributes — not CSS style —
@@ -178,12 +101,18 @@ export const Element = React.memo(function Element({ element, children, isRoot }
       (svgElStyle as Record<string, unknown>)[key] = element.style[key as keyof typeof element.style];
     }
   }
-  Object.assign(svgElStyle, { cursor: 'move', userSelect: 'none' });
+  Object.assign(svgElStyle, { cursor: 'default', userSelect: 'none' });
 
   // Non-SVG (div/span) CSS style: ALL of element.style + positioning
+  // Priority (last wins):
+  //   1. element.style — AI-authored CSS
+  //   2. cursor/userSelect overrides
+  //   3. Known positioning contexts (root, explicit absolute, frame)
+  //   4. Render-only position:relative for selection overlay — only fills the
+  //      static/unpositioned case; never overrides explicit absolute/fixed/relative.
   const divStyle: React.CSSProperties = {
     ...element.style,
-    cursor: 'move',
+    cursor: 'default',
     userSelect: 'none',
     ...(isRoot
       ? { position: 'relative' as const, width: '100%' }
@@ -192,6 +121,9 @@ export const Element = React.memo(function Element({ element, children, isRoot }
       : isFrame
       ? { position: 'relative' as const }
       : {}),
+    // Render-only: inject positioning context for selection outline if element is static.
+    // Must come last so it does not override explicit absolute/fixed/relative from above.
+    ...(needsSelectionPositionContext && selection ? { position: 'relative' as const } : {}),
   };
 
   // ── Render SVG elements ──────────────────────────────────────────────────────
@@ -300,7 +232,6 @@ export const Element = React.memo(function Element({ element, children, isRoot }
 
   return (
     <div
-      ref={elementRef as React.RefObject<HTMLDivElement>}
       data-paper-node={element.id}
       data-paper-name={element.name}
       style={divStyle}
@@ -311,24 +242,18 @@ export const Element = React.memo(function Element({ element, children, isRoot }
         <span style={{ display: 'block', whiteSpace: 'pre-wrap' }}>{element.text}</span>
       )}
 
-      {selection && isPositioned && (
-        <>
-          <div style={{
-            position: 'absolute', inset: 0, border: '1.5px solid #0066ff',
+      {/* Selection outline — visible for all selected non-SVG elements.
+          For elements that are static/unpositioned, divStyle already injected
+          position:relative above so this absolute overlay stays contained. */}
+      {selection && (
+        <div
+          data-paper-ui
+          style={{
+            position: 'absolute', inset: 0,
+            border: '1.5px solid #0066ff',
             pointerEvents: 'none', zIndex: 10,
-          }} />
-          {HANDLES.map((h) => (
-            <div
-              key={h}
-              onMouseDown={(e) => handleResizeMouseDown(e, h)}
-              style={{
-                position: 'absolute', width: 8, height: 8,
-                background: '#fff', border: '1px solid #0066ff', borderRadius: 1,
-                zIndex: 11, ...HANDLE_STYLE[h],
-              }}
-            />
-          ))}
-        </>
+          }}
+        />
       )}
 
       {children}
