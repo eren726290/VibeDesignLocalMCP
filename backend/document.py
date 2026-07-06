@@ -1726,6 +1726,25 @@ class DocumentStore:
         el_id = tag["data-paper-node"]
         tag_name = tag.name
         style = self._parse_css_style(tag.get("style", ""))
+
+        if tag_name in self._SVG_TAGS:
+            attrs = dict(tag.attrs)
+
+            def camel_to_kebab(name: str) -> str:
+                return "".join(f"-{ch.lower()}" if ch.isupper() else ch for ch in name)
+
+            for attr in self._SVG_ATTRS:
+                key_lower = attr.lower()
+                key_kebab = camel_to_kebab(attr)
+                if key_lower in attrs:
+                    style[attr] = attrs[key_lower]
+                elif key_kebab in attrs:
+                    style[attr] = attrs[key_kebab]
+                elif attr in attrs:
+                    style[attr] = attrs[attr]
+                if attr == "xlinkHref" and "xlink:href" in attrs:
+                    style["xlinkHref"] = attrs["xlink:href"]
+
         native_id = tag.get("id")
         if native_id:
             style["id"] = native_id
