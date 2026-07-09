@@ -73,11 +73,11 @@ export async function openDocument(docId: string, filePath: string) {
   }, id);
 }
 
-export async function createElement(docId: string, element: Record<string, unknown>) {
+export async function createElement(docId: string, element: Record<string, unknown>, pageId?: string) {
   const id = resolveDocId(docId);
   return api(`/api/documents/${id}/elements`, {
     method: 'POST',
-    body: JSON.stringify(element),
+    body: JSON.stringify(pageId ? { element, pageId } : element),
   }, id);
 }
 
@@ -170,7 +170,7 @@ declare global {
       getDocument: (docId: string) => Promise<unknown>;
       saveDocument: (docId: string, filePath?: string) => Promise<unknown>;
       openDocument: (docId: string, filePath: string) => Promise<unknown>;
-      createElement: (docId: string, element: Record<string, unknown>) => Promise<unknown>;
+      createElement: (docId: string, element: Record<string, unknown>, pageId?: string) => Promise<unknown>;
       createPage: (docId: string, page: Record<string, unknown>) => Promise<unknown>;
       updateElement: (docId: string, elementId: string, updates: Record<string, unknown>) => Promise<unknown>;
       deleteElement: (docId: string, elementId: string) => Promise<unknown>;

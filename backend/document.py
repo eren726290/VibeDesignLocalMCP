@@ -167,9 +167,18 @@ class DocumentStore:
                 self.documents[doc.id] = doc
                 if repairs:
                     print(f"[document-repair] {f.name}: " + "; ".join(repairs))
+                    self._backup_before_repair(f)
                     self._save(doc.id)
             except Exception as exc:
                 print(f"[document-load-error] {f.name}: {exc}")
+
+    @staticmethod
+    def _backup_before_repair(file_path: Path):
+        """Preserve the original persisted document before an automatic repair."""
+        backup_path = file_path.with_suffix(file_path.suffix + ".bak")
+        if backup_path.exists():
+            return
+        backup_path.write_bytes(file_path.read_bytes())
 
     def _save(self, doc_id: str):
         """Persist document to disk after every mutation"""

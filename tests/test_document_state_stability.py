@@ -90,6 +90,32 @@ def test_single_artboard_write_can_still_use_current_page():
         temporary.cleanup()
 
 
+def test_create_element_targets_explicit_page_not_current_page():
+    original_data_dir = document_module.DATA_DIR
+    temporary, store = _store_in_temp_dir()
+    try:
+        store.documents["active-doc"] = Document(
+            id="active-doc",
+            title="Element targeting",
+            current_page=1,
+            pages=[
+                Page(id="deck-4x3", name="4:3", width=960, height=720),
+                Page(id="deck-9x16", name="9:16", width=720, height=1280),
+            ],
+        )
+
+        result = store.create_element(
+            "active-doc", {"id": "targeted-element", "name": "Target", "style": {}}, "deck-4x3"
+        )
+
+        assert result["success"]
+        assert [el["id"] for el in store.documents["active-doc"].pages[0].elements] == ["targeted-element"]
+        assert store.documents["active-doc"].pages[1].elements == []
+    finally:
+        document_module.DATA_DIR = original_data_dir
+        temporary.cleanup()
+
+
 def test_load_repairs_document_integrity_deterministically():
     temporary = tempfile.TemporaryDirectory()
     original_data_dir = document_module.DATA_DIR
@@ -125,6 +151,7 @@ def test_load_repairs_document_integrity_deterministically():
         (document_module.DATA_DIR / "broken-doc.json").write_text(json.dumps(broken), encoding="utf-8")
 
         repaired = DocumentStore().documents["broken-doc"]
+        backup_path = document_module.DATA_DIR / "broken-doc.json.bak"
         page_ids = [page.id for page in repaired.pages]
         node_ids = [element["id"] for page in repaired.pages for element in page.elements]
 
@@ -135,6 +162,9 @@ def test_load_repairs_document_integrity_deterministically():
         assert repaired.pages[1].height == 812
         assert all(isinstance(element["style"], dict) for page in repaired.pages for element in page.elements)
         assert repaired.pages[0].elements[0]["children"] == ["node-b"]
+        assert backup_path.exists()
+        assert json.loads(backup_path.read_text(encoding="utf-8")) == broken
+        assert json.loads((document_module.DATA_DIR / "broken-doc.json").read_text(encoding="utf-8")) != broken
     finally:
         document_module.DATA_DIR = original_data_dir
         temporary.cleanup()
@@ -144,5 +174,6 @@ if __name__ == "__main__":
     test_open_keeps_document_and_page_ids_stable()
     test_multi_artboard_writes_require_an_explicit_target()
     test_single_artboard_write_can_still_use_current_page()
+    test_create_element_targets_explicit_page_not_current_page()
     test_load_repairs_document_integrity_deterministically()
     print("Document state stability checks passed.")

@@ -86,6 +86,8 @@ def test_priority_schema_terms():
     assert "count" in text
     assert "deleted" in text
     assert "replace" in text
+    assert "multi-artboard" in text
+    assert "pageId or targetNodeId" in text
 
     # update_styles
     text = _combined_text(tools["update_styles"])

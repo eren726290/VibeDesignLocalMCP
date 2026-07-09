@@ -173,7 +173,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
     syncManager.pauseSync();
     set({ document: updated });
-    bridge.createElement(document.id, element as unknown as Record<string, unknown>)
+    bridge.createElement(
+      document.id,
+      element as unknown as Record<string, unknown>,
+      document.pages[document.current_page]?.id,
+    )
       .catch(() => {})
       .finally(() => syncManager.resumeSync());
     get().pushHistory();
