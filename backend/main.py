@@ -1778,9 +1778,7 @@ async def _open_document(doc_id: str, args: dict) -> dict:
     file_path = args.get("filePath", "")
     if not file_path:
         return {"error": "filePath is required"}
-    import uuid
-    new_id = str(uuid.uuid4())[:8]
-    return doc_store.open_document(new_id, file_path)
+    return doc_store.open_document(doc_id or "default", file_path)
 
 
 async def _export_html(doc_id: str, args: dict) -> dict:
@@ -2465,19 +2463,18 @@ async def api_save_document(doc_id: str):
 
 
 @app.post("/api/documents/{doc_id}/open")
-async def api_open_document(doc_id: str, file_path: str):
-    result = doc_store.open_document(doc_id, file_path)
+async def api_open_document(doc_id: str, body: dict):
+    file_path = body.get("file_path") or body.get("filePath")
+    result = doc_store.open_document(doc_id, file_path or "")
     _raise_for_store_error(result)
     return result
 
 
 @app.patch("/api/documents/{doc_id}/current-page")
 async def api_set_current_page(doc_id: str, body: dict):
-    doc = doc_store.documents.get(doc_id)
-    if not doc:
-        return JSONResponse({"error": "Document not found"}, status_code=404)
-    doc.current_page = body.get("current_page", 0)
-    return {"success": True}
+    result = doc_store.set_current_page(doc_id, body.get("current_page", 0))
+    _raise_for_store_error(result)
+    return result
 
 
 @app.post("/api/documents/{doc_id}/pages")

@@ -11,7 +11,7 @@ from typing import Optional
 import os
 
 DATA_DIR = Path.home() / ".paper_clone" / "data"
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Element(BaseModel):
@@ -20,7 +20,7 @@ class Element(BaseModel):
     tag: str = "div"
     type: str = "rectangle"
     style: dict
-    children: list = []
+    children: list = Field(default_factory=list)
     text: Optional[str] = None
 
 
@@ -32,7 +32,7 @@ class Page(BaseModel):
     width: int = 375
     height: int = 812
     backgroundColor: Optional[str] = "#ffffff"
-    elements: list[dict] = []
+    elements: list[dict] = Field(default_factory=list)
 
 
 class Document(BaseModel):
@@ -163,9 +163,13 @@ class DocumentStore:
                 with open(f, encoding="utf-8") as fp:
                     data = json.load(fp)
                 doc = Document.model_validate(data)
+                repairs = self._repair_document(doc)
                 self.documents[doc.id] = doc
-            except Exception:
-                pass  # Skip corrupted files
+                if repairs:
+                    print(f"[document-repair] {f.name}: " + "; ".join(repairs))
+                    self._save(doc.id)
+            except Exception as exc:
+                print(f"[document-load-error] {f.name}: {exc}")
 
     def _save(self, doc_id: str):
         """Persist document to disk after every mutation"""
@@ -173,11 +177,108 @@ class DocumentStore:
         if not doc:
             return
         try:
+            repairs = self._repair_document(doc)
+            if repairs:
+                print(f"[document-repair] {doc_id}: " + "; ".join(repairs))
             self._doc_file(doc_id).write_text(
                 doc.model_dump_json(indent=2), encoding="utf-8"
             )
-        except Exception:
-            pass  # Non-fatal: continue even if disk write fails
+        except Exception as exc:
+            print(f"[document-save-error] {doc_id}: {exc}")
+
+    @staticmethod
+    def _repair_id(prefix: str, position: int, used_ids: set[str]) -> str:
+        candidate = f"{prefix}-repaired-{position}"
+        suffix = 2
+        while candidate in used_ids:
+            candidate = f"{prefix}-repaired-{position}-{suffix}"
+            suffix += 1
+        return candidate
+
+    def _repair_document(self, doc: Document) -> list[str]:
+        """Normalize persisted state so malformed records cannot silently drift."""
+        repairs: list[str] = []
+        used_page_ids: set[str] = set()
+        used_node_ids: set[str] = set()
+
+        for page_index, page in enumerate(doc.pages, start=1):
+            page_id = str(page.id or "").strip()
+            if not page_id or page_id in used_page_ids:
+                page_id = self._repair_id("page", page_index, used_page_ids)
+                page.id = page_id
+                repairs.append(f"repaired page ID at index {page_index}")
+            used_page_ids.add(page_id)
+
+            for field, fallback in (("width", 375), ("height", 812)):
+                value = getattr(page, field)
+                if not isinstance(value, int) or value <= 0:
+                    setattr(page, field, fallback)
+                    repairs.append(f"repaired {field} on page '{page_id}'")
+
+            raw_elements = [el for el in page.elements if isinstance(el, dict)]
+            if len(raw_elements) != len(page.elements):
+                repairs.append(f"dropped invalid elements on page '{page_id}'")
+            page.elements = raw_elements
+
+            old_to_new: dict[str, str] = {}
+            element_by_id: dict[str, dict] = {}
+            original_children: dict[str, list] = {}
+            for element_index, element in enumerate(page.elements, start=1):
+                old_id = str(element.get("id") or "").strip()
+                node_id = old_id
+                if not node_id or node_id in used_node_ids:
+                    node_id = self._repair_id("node", element_index, used_node_ids)
+                    element["id"] = node_id
+                    repairs.append(f"repaired node ID on page '{page_id}'")
+                used_node_ids.add(node_id)
+                if old_id and old_id not in old_to_new:
+                    old_to_new[old_id] = node_id
+                old_to_new.setdefault(node_id, node_id)
+                element_by_id[node_id] = element
+                original_children[node_id] = element.get("children") if isinstance(element.get("children"), list) else []
+                if not isinstance(element.get("style"), dict):
+                    element["style"] = {}
+                    repairs.append(f"repaired style on node '{node_id}'")
+                element.setdefault("name", "Div Element")
+                element.setdefault("tag", "div")
+                element.setdefault("type", "div")
+                if element.get("text") is not None and not isinstance(element.get("text"), str):
+                    element["text"] = str(element["text"])
+
+            for node_id, element in element_by_id.items():
+                parent_id = old_to_new.get(str(element.get("parentId") or "").strip())
+                if parent_id and parent_id != node_id and parent_id in element_by_id:
+                    element["parentId"] = parent_id
+                else:
+                    element.pop("parentId", None)
+
+            for parent_id, children in original_children.items():
+                for child_id in children:
+                    mapped_child_id = old_to_new.get(str(child_id))
+                    child = element_by_id.get(mapped_child_id or "")
+                    if child and mapped_child_id != parent_id and not child.get("parentId"):
+                        child["parentId"] = parent_id
+
+            rebuilt_children = {node_id: [] for node_id in element_by_id}
+            for node_id, element in element_by_id.items():
+                parent_id = element.get("parentId")
+                if parent_id:
+                    rebuilt_children[parent_id].append(node_id)
+            for node_id, element in element_by_id.items():
+                if element.get("children") != rebuilt_children[node_id]:
+                    repairs.append(f"rebuilt child links on page '{page_id}'")
+                element["children"] = rebuilt_children[node_id]
+
+        if not doc.pages:
+            if doc.current_page != 0:
+                doc.current_page = 0
+                repairs.append("reset current page for empty document")
+        else:
+            corrected_page = min(max(int(doc.current_page or 0), 0), len(doc.pages) - 1)
+            if corrected_page != doc.current_page:
+                doc.current_page = corrected_page
+                repairs.append("clamped current page")
+        return list(dict.fromkeys(repairs))
 
     def new_document(self, doc_id: str = None) -> dict:
         """Create a new blank document"""
@@ -202,8 +303,20 @@ class DocumentStore:
         """Get document by ID — source of truth is in-memory."""
         doc = self.documents.get(doc_id)
         if not doc:
-            return self.new_document()
+            return self.new_document(doc_id)
         return self._doc_to_response(doc)
+
+    def set_current_page(self, doc_id: str, page_index: int) -> dict:
+        doc = self.documents.get(doc_id)
+        if not doc:
+            return {"error": "Document not found"}
+        if not doc.pages:
+            return {"error": "Document has no artboards"}
+        if not isinstance(page_index, int) or not 0 <= page_index < len(doc.pages):
+            return {"error": f"Invalid current page index: {page_index}"}
+        doc.current_page = page_index
+        self._save(doc_id)
+        return {"success": True, "current_page": page_index, "pageId": doc.pages[page_index].id}
 
     def save_document(self, doc_id: str, file_path: str = None) -> dict:
         """Save document to HTML file"""
@@ -278,6 +391,9 @@ class DocumentStore:
             page["height"] = 812
         if "elements" not in page:
             page["elements"] = []
+
+        if any(existing.id == page["id"] for existing in doc.pages):
+            return {"error": f"Page '{page['id']}' already exists"}
 
         new_page = Page(
             id=page["id"],
@@ -1169,6 +1285,8 @@ class DocumentStore:
         doc = self.documents.get(doc_id)
         if not doc:
             return {"success": False, "error": "Document not found"}
+        if not doc.pages:
+            return {"success": False, "error": "Document has no artboards"}
 
         parsed = parse_html_elements(html)
         if not parsed:
@@ -1179,30 +1297,36 @@ class DocumentStore:
         target_page = None
         target_el = None
 
+        if page_id:
+            target_page = next((p for p in doc.pages if p.id == page_id), None)
+            if not target_page:
+                return {"success": False, "error": f"Page '{page_id}' not found"}
+
         if target_node_id:
-            # Check if target_node_id is a page ID
-            for p in doc.pages:
+            candidate_pages = [target_page] if target_page else doc.pages
+            for p in candidate_pages:
                 if p.id == target_node_id:
                     target_page = p
                     break
-            if not target_page:
-                # Check if it's an element ID
-                for p in doc.pages:
-                    for el in p.elements:
-                        if el.get("id") == target_node_id:
-                            target_page = p
-                            target_el = el
-                            break
-                    if target_page:
+                for el in p.elements:
+                    if el.get("id") == target_node_id:
+                        target_page = p
+                        target_el = el
                         break
-        elif page_id:
-            for p in doc.pages:
-                if p.id == page_id:
-                    target_page = p
+                if target_page:
                     break
-
-        if not target_page:
+            if not target_page:
+                return {"success": False, "error": f"Target node '{target_node_id}' not found"}
+        elif not target_page and len(doc.pages) == 1:
             target_page = doc.pages[doc.current_page]
+        elif not target_page:
+            return {
+                "success": False,
+                "error": "pageId or targetNodeId is required when the document has multiple artboards",
+            }
+
+        if mode not in {"append", "replace-children", "replace"}:
+            return {"success": False, "error": f"Unsupported write mode: {mode}"}
 
         # Dispatch by mode
         created_ids = []
@@ -1227,6 +1351,7 @@ class DocumentStore:
             "count": len(created),
             "document": self._doc_to_response(doc),
             "mode": mode,
+            "pageId": target_page.id,
             "targetNodeId": target_node_id,
             "deleted": deleted_ids,
         }
@@ -1633,8 +1758,9 @@ class DocumentStore:
                 elements_html += self._render_element(root, elements_by_id, indent, indent, nl)
 
             page_name = html.escape(page.name)
+            page_id = html.escape(page.id, quote=True)
             bg_color = html.escape(page.backgroundColor or "#ffffff")
-            pages_html += f'{indent}<div data-paper-page="{i}" data-paper-name="{page_name}"{nl}'
+            pages_html += f'{indent}<div data-paper-page="{i}" data-paper-page-id="{page_id}" data-paper-name="{page_name}"{nl}'
             pages_html += f'{indent}     style="width: {page.width}px; height: {page.height}px; position: absolute; left: {page.x}px; top: {page.y}px; background: {bg_color};">{nl}'
             pages_html += elements_html
             pages_html += f'{indent}</div>{nl}'
@@ -1828,7 +1954,7 @@ class DocumentStore:
                 self._parse_element_tree(child, elements)
 
             pages.append(Page(
-                id=f"page-{page_idx}",
+                id=page_div.get("data-paper-page-id") or f"page-{page_idx}",
                 name=page_name,
                 x=x,
                 y=y,
