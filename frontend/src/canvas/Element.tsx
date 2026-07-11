@@ -115,7 +115,7 @@ export const Element = React.memo(function Element({ element, children, isRoot }
     cursor: 'default',
     userSelect: 'none',
     ...(isRoot
-      ? { position: 'relative' as const, width: '100%' }
+      ? { position: 'relative' as const, width: '100%', height: '100%' }
       : hasExplicitAbsolute
       ? { position: 'absolute' as const }
       : isFrame
@@ -124,6 +124,7 @@ export const Element = React.memo(function Element({ element, children, isRoot }
     // Render-only: inject positioning context for selection outline if element is static.
     // Must come last so it does not override explicit absolute/fixed/relative from above.
     ...(needsSelectionPositionContext && selection ? { position: 'relative' as const } : {}),
+    ...(selection ? { outline: '1.5px solid #0066ff', outlineOffset: '-1.5px' } : {}),
   };
 
   // ── Render SVG elements ──────────────────────────────────────────────────────
@@ -230,8 +231,16 @@ export const Element = React.memo(function Element({ element, children, isRoot }
     );
   }
 
+  const nativeHtmlTags = new Set([
+    'a', 'article', 'aside', 'blockquote', 'button', 'caption', 'code', 'div',
+    'em', 'figcaption', 'figure', 'footer', 'form', 'header', 'h1', 'h2', 'h3',
+    'h4', 'h5', 'h6', 'label', 'li', 'main', 'nav', 'ol', 'p', 'section', 'small',
+    'span', 'strong', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul',
+  ]);
+  const HtmlTag = (nativeHtmlTags.has(element.tag) ? element.tag : 'div') as keyof React.JSX.IntrinsicElements;
+
   return (
-    <div
+    <HtmlTag
       data-paper-node={element.id}
       data-paper-name={element.name}
       style={divStyle}
@@ -245,18 +254,7 @@ export const Element = React.memo(function Element({ element, children, isRoot }
       {/* Selection outline — visible for all selected non-SVG elements.
           For elements that are static/unpositioned, divStyle already injected
           position:relative above so this absolute overlay stays contained. */}
-      {selection && (
-        <div
-          data-paper-ui
-          style={{
-            position: 'absolute', inset: 0,
-            border: '1.5px solid #0066ff',
-            pointerEvents: 'none', zIndex: 10,
-          }}
-        />
-      )}
-
       {children}
-    </div>
+    </HtmlTag>
   );
 });
