@@ -661,8 +661,7 @@ export function LayerPanel() {
         <button
           onClick={() => {
             const id = `doc-${Date.now().toString(36)}`;
-            bridge.switchDocument(id);
-            bridge.newDocument().then((doc: any) => {
+            bridge.newDocument(id).then((doc: any) => {
               useEditorStore.getState().setDocument(doc);
             }).catch(() => {});
           }}

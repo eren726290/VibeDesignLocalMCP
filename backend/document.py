@@ -148,17 +148,62 @@ class DocumentStore:
     def __init__(self):
         self.documents: dict[str, Document] = {}
         self._screenshot_data: dict[str, dict] = {}
+        self.active_document_id: Optional[str] = None
         # Ensure data directory exists
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         # Load any existing documents from disk
         self._load_all()
+        self._restore_active_document()
 
     def _doc_file(self, doc_id: str) -> Path:
         return DATA_DIR / f"{doc_id}.json"
 
+    def _active_document_file(self) -> Path:
+        return DATA_DIR / "_active-document.json"
+
+    def _restore_active_document(self):
+        """Restore the shared workspace selected by the last frontend session."""
+        active_file = self._active_document_file()
+        try:
+            active_id = json.loads(active_file.read_text(encoding="utf-8")).get("docId")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            active_id = None
+
+        if active_id in self.documents:
+            self.active_document_id = active_id
+        elif "default" in self.documents:
+            self.active_document_id = "default"
+        elif self.documents:
+            self.active_document_id = next(iter(self.documents))
+
+    def get_active_document_id(self) -> str:
+        if self.active_document_id in self.documents:
+            return self.active_document_id
+        if "default" not in self.documents:
+            self.new_document("default")
+        self.set_active_document("default")
+        return "default"
+
+    def get_active_document(self) -> dict:
+        return self.get_document(self.get_active_document_id())
+
+    def set_active_document(self, doc_id: str) -> dict:
+        if doc_id not in self.documents:
+            return {"error": "Document not found"}
+        self.active_document_id = doc_id
+        try:
+            self._active_document_file().write_text(
+                json.dumps({"docId": doc_id}, indent=2), encoding="utf-8"
+            )
+        except OSError as exc:
+            return {"error": f"Could not persist active document: {exc}"}
+        return self._doc_to_response(self.documents[doc_id])
+
     def _load_all(self):
         """Load all documents from disk on startup"""
         for f in DATA_DIR.glob("*.json"):
+            if f == self._active_document_file():
+                continue
             try:
                 with open(f, encoding="utf-8") as fp:
                     data = json.load(fp)

@@ -47,8 +47,24 @@ async function api<T>(endpoint: string, options: RequestInit = {}, docId?: strin
 // Document API
 // =============================================================================
 
-export async function newDocument() {
-  return api('/api/documents/new', { method: 'POST' });
+export async function newDocument(docId?: string) {
+  const id = resolveDocId(docId);
+  const document = await api<any>('/api/documents/new', { method: 'POST' }, id);
+  setActiveDocId(document.id);
+  return document;
+}
+
+export async function getActiveDocument() {
+  const document = await api<any>('/api/documents/active');
+  setActiveDocId(document.id);
+  return document;
+}
+
+export async function activateDocument(docId: string) {
+  const id = resolveDocId(docId);
+  const document = await api<any>(`/api/documents/${id}/active`, { method: 'PUT' }, id);
+  setActiveDocId(document.id);
+  return document;
 }
 
 export async function getDocument(docId?: string) {
@@ -166,7 +182,9 @@ export async function setCurrentPage(docId: string, index: number) {
 declare global {
   interface Window {
     paperBridge?: {
-      newDocument: () => Promise<unknown>;
+      newDocument: (docId?: string) => Promise<unknown>;
+      getActiveDocument: () => Promise<unknown>;
+      activateDocument: (docId: string) => Promise<unknown>;
       getDocument: (docId: string) => Promise<unknown>;
       saveDocument: (docId: string, filePath?: string) => Promise<unknown>;
       openDocument: (docId: string, filePath: string) => Promise<unknown>;
@@ -188,6 +206,8 @@ declare global {
 // Export API for use in components
 export const bridge = {
   newDocument,
+  getActiveDocument,
+  activateDocument,
   getDocument,
   saveDocument,
   openDocument,

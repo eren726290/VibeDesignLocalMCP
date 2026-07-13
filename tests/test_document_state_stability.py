@@ -116,6 +116,23 @@ def test_create_element_targets_explicit_page_not_current_page():
         temporary.cleanup()
 
 
+def test_active_document_persists_across_store_restart():
+    original_data_dir = document_module.DATA_DIR
+    temporary, store = _store_in_temp_dir()
+    try:
+        store.new_document("shared-workspace")
+        activated = store.set_active_document("shared-workspace")
+
+        restarted = DocumentStore()
+
+        assert activated["id"] == "shared-workspace"
+        assert restarted.get_active_document_id() == "shared-workspace"
+        assert restarted.get_active_document()["id"] == "shared-workspace"
+    finally:
+        document_module.DATA_DIR = original_data_dir
+        temporary.cleanup()
+
+
 def test_load_repairs_document_integrity_deterministically():
     temporary = tempfile.TemporaryDirectory()
     original_data_dir = document_module.DATA_DIR
@@ -175,5 +192,6 @@ if __name__ == "__main__":
     test_multi_artboard_writes_require_an_explicit_target()
     test_single_artboard_write_can_still_use_current_page()
     test_create_element_targets_explicit_page_not_current_page()
+    test_active_document_persists_across_store_restart()
     test_load_repairs_document_integrity_deterministically()
     print("Document state stability checks passed.")
