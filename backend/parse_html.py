@@ -188,16 +188,17 @@ def parse_html_elements(html: str) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
 
     # Collect all tags in document order
+    top_level_tags = soup.find_all(recursive=False)
     all_tags = []
-    for tag in soup.find_all(recursive=False):
+    for tag in top_level_tags:
         _collect_tags(tag, all_tags)
 
     elements = []
     # Map from Python id(Tag) → our element id
     bs_to_el_id = {}
     el_by_id = {}
-    # Track whether this is the outermost element (first in document order)
-    is_first = True
+    # Only a sole top-level element acts as the full-artboard wrapper.
+    single_root = top_level_tags[0] if len(top_level_tags) == 1 else None
 
     for tag in all_tags:
         attrs = dict(tag.attrs)
@@ -208,14 +209,13 @@ def parse_html_elements(html: str) -> list[dict]:
         if "id" in attrs and attrs["id"]:
             style["id"] = attrs["id"]
 
-        # The outermost element fills the artboard naturally.
+        # A sole top-level element fills the artboard naturally.
         # Strip any layout props that would override natural flow — the artboard
         # provides the viewport dimensions (375×812 etc.). The frontend sets
         # width:100% for the root, so width/height from AI are redundant.
         # Exception: SVG elements need width/height for their display size,
         # and use viewBox for the internal coordinate system.
-        if is_first:
-            is_first = False
+        if tag is single_root:
             strip_keys = ["position", "left", "top", "right", "bottom"]
             if tag.name != "svg":
                 strip_keys.extend(["width", "height"])
