@@ -148,6 +148,7 @@ export function ArtboardFrame({ page, elementsMap }: { page: Page; elementsMap: 
   }, [resizing, page.id, updateArtboard]);
 
   const roots = page.elements.filter((el) => !el.parentId);
+  const hasSingleRoot = roots.length === 1;
 
   return (
     // Outer wrapper: positions the artboard on the canvas (frameRef tracks this for drag/resize)
@@ -212,7 +213,13 @@ export function ArtboardFrame({ page, elementsMap }: { page: Page; elementsMap: 
       {/* Clip page content without hiding the header that sits above the artboard. */}
       <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
         {roots.map((el) => (
-          <ElementNode key={el.id} element={el} elementsMap={elementsMap} isRoot />
+          <ElementNode
+            key={el.id}
+            element={el}
+            elementsMap={elementsMap}
+            isRoot
+            fillsArtboard={hasSingleRoot}
+          />
         ))}
 
         {isSelected && (
@@ -250,7 +257,7 @@ function getChildIds(elementId: string, elementsMap: Map<string, ElementType>): 
   return children;
 }
 
-function ElementNode({ element, elementsMap, isRoot = false, inSvg = false }: { element: ElementType; elementsMap: Map<string, ElementType>; isRoot?: boolean; inSvg?: boolean }) {
+function ElementNode({ element, elementsMap, isRoot = false, fillsArtboard = false, inSvg = false }: { element: ElementType; elementsMap: Map<string, ElementType>; isRoot?: boolean; fillsArtboard?: boolean; inSvg?: boolean }) {
   const children = getChildIds(element.id, elementsMap);
 
   // Elements with text always go to positionedChildren (they need to render as block
@@ -302,7 +309,7 @@ function ElementNode({ element, elementsMap, isRoot = false, inSvg = false }: { 
   );
 
   return (
-    <Element key={element.id} element={element} isRoot={isRoot}>
+    <Element key={element.id} element={element} isRoot={isRoot} fillsArtboard={fillsArtboard}>
       {renderedChildren}
       {/* Inline text children rendered as inline spans to preserve per-element styling */}
       {inlineTexts.map((t, i) => (

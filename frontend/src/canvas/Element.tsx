@@ -6,9 +6,10 @@ interface ElementProps {
   element: ElementType;
   children?: React.ReactNode;
   isRoot?: boolean;
+  fillsArtboard?: boolean;
 }
 
-export const Element = React.memo(function Element({ element, children, isRoot }: ElementProps) {
+export const Element = React.memo(function Element({ element, children, isRoot, fillsArtboard }: ElementProps) {
   const selection = useEditorStore((s) => s.selection?.nodeId === element.id);
   const isFrame = element.type === 'frame';
   const isSvg = [
@@ -114,7 +115,7 @@ export const Element = React.memo(function Element({ element, children, isRoot }
     ...element.style,
     cursor: 'default',
     userSelect: 'none',
-    ...(isRoot
+    ...(fillsArtboard
       ? { position: 'relative' as const, width: '100%', height: '100%' }
       : hasExplicitAbsolute
       ? { position: 'absolute' as const }
