@@ -315,3 +315,39 @@ OpenCode does not write this file. Codex reviews completed work and records the 
   - real agent workflow using write/inspect/edit/diagnose/export tools without schema confusion
 - Notes:
   - Duplicate `test-page-001` artboards are not treated as an issue for this checkpoint.
+
+### Historical Merge Log - State Drift, Workspace Sync, and Native Canvas Layout Fixes
+
+- Actor: Codex
+- Summary: Reviewed, merged, and verified three Codex PC fix branches into `main`.
+- Merge order:
+  - `codex/fix-document-page-routing-drift` at `8c96dc9`
+  - `codex/fix-shared-workspace-sync` at `8139991`
+  - `codex/fix-native-html-canvas-layouts` at `d5bd6a3`
+- Merge commits on `main`:
+  - `501a51c` - Merge document page routing drift fix
+  - `694f900` - Merge shared workspace sync fix
+  - `848a032` - Merge native HTML canvas layout fix
+- Accepted behavior changes:
+  - Document/page routing drift fix: stabilizes page IDs across save/open, routes `open_document` into the caller document ID, rejects ambiguous multi-artboard `write_html`, syncs frontend selection to backend `current_page`, passes explicit page IDs for element creation, and repairs persisted document integrity with `.json.bak` backups.
+  - Shared workspace sync fix: persists backend active workspace, restores it on startup, routes headerless MCP calls to the active workspace, activates frontend-created/opened documents, and makes `+ New Doc` create and activate the intended workspace instead of leaving agents in the old one.
+  - Native HTML canvas layout fix: preserves native HTML/SVG canvas rendering, clips only artboard content rather than the header, renders native HTML tags instead of forcing all non-SVG nodes to `div`, and preserves multi-root `write_html` flow while keeping single-root full-artboard wrapper behavior.
+- Review notes:
+  - `codex/fix-document-page-routing-drift` was reviewed after follow-up `8c96dc9`; no blocking findings remained.
+  - `codex/fix-shared-workspace-sync` was reviewed at `8139991`; backend regression checks passed and behavior matched the reported new-doc/workspace bug.
+  - `codex/fix-native-html-canvas-layouts` initially had a multi-root clipping risk; follow-up `d5bd6a3` added `tests/test_multi_root_write_html.py` and resolved the concern.
+- Verification run by Codex during review:
+  - `python3 -m py_compile backend/main.py backend/document.py`
+  - `python3 tests/test_mcp_tool_schema.py`
+  - `python3 tests/test_svg_save_open_roundtrip.py`
+  - `python3 tests/test_document_state_stability.py`
+  - `python3 tests/test_multi_root_write_html.py`
+  - `python3 -m py_compile backend/parse_html.py backend/document.py`
+  - `git diff --check`
+- PC verification reported by Eren/Codex PC:
+  - 4:3/native HTML layout behavior visually confirmed.
+  - Shared workspace/new-doc agent sync behavior confirmed.
+  - Multi-root red/blue sibling `write_html` case visually confirmed in Chrome.
+- Notes:
+  - The routing branch was based on `codex/task-33-49-checkpoint`, so merging it into `main` also brought the checkpoint documentation/test history that lived on that branch.
+  - Final merge resolved native canvas conflicts by keeping the latest `fillsArtboard`/single-root behavior from `d5bd6a3`.
