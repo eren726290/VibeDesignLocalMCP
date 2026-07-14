@@ -209,19 +209,20 @@ export function ArtboardFrame({ page, elementsMap }: { page: Page; elementsMap: 
         >✕</span>
       </div>
 
-      {/* Artboard elements */}
-      {roots.map((el) => (
-        <ElementNode key={el.id} element={el} elementsMap={elementsMap} isRoot />
-      ))}
+      {/* Clip page content without hiding the header that sits above the artboard. */}
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+        {roots.map((el) => (
+          <ElementNode key={el.id} element={el} elementsMap={elementsMap} isRoot />
+        ))}
 
-      {/* Selection border */}
-      {isSelected && (
-        <div data-paper-ui style={{
-          position: 'absolute', inset: 0,
-          border: '2px solid #0066ff',
-          pointerEvents: 'none', zIndex: 10,
-        }} />
-      )}
+        {isSelected && (
+          <div data-paper-ui style={{
+            position: 'absolute', inset: 0,
+            border: '2px solid #0066ff',
+            pointerEvents: 'none', zIndex: 10,
+          }} />
+        )}
+      </div>
 
       {/* Resize handles */}
       {isSelected && HANDLES.map((h) => (
@@ -249,7 +250,7 @@ function getChildIds(elementId: string, elementsMap: Map<string, ElementType>): 
   return children;
 }
 
-function ElementNode({ element, elementsMap, inSvg = false }: { element: ElementType; elementsMap: Map<string, ElementType>; isRoot?: boolean; inSvg?: boolean }) {
+function ElementNode({ element, elementsMap, isRoot = false, inSvg = false }: { element: ElementType; elementsMap: Map<string, ElementType>; isRoot?: boolean; inSvg?: boolean }) {
   const children = getChildIds(element.id, elementsMap);
 
   // Elements with text always go to positionedChildren (they need to render as block
@@ -294,14 +295,14 @@ function ElementNode({ element, elementsMap, inSvg = false }: { element: Element
     ) : (
       // Wrap in a div with stopPropagation — prevents clicks on this child
       // from bubbling up to the parent Element's onClick handler
-      <div key={child.id} onClick={(e) => e.stopPropagation()}>
+      <React.Fragment key={child.id}>
         <ElementNode element={child} elementsMap={elementsMap} />
-      </div>
+      </React.Fragment>
     )
   );
 
   return (
-    <Element key={element.id} element={element}>
+    <Element key={element.id} element={element} isRoot={isRoot}>
       {renderedChildren}
       {/* Inline text children rendered as inline spans to preserve per-element styling */}
       {inlineTexts.map((t, i) => (

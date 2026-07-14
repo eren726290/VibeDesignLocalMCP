@@ -2358,7 +2358,9 @@ async def mcp_post(request: Request):
     except:
         return JSONResponse({"error": "invalid_request"}, status_code=400)
 
-    doc_id = request.headers.get("x-paper-doc-id", "default")
+    # Local MCP clients do not share browser localStorage. When no explicit
+    # document header is supplied, use the persisted active workspace.
+    doc_id = request.headers.get("x-paper-doc-id") or doc_store.get_active_document_id()
 
     # HTTP type: {name, arguments}
     if "name" in data and "jsonrpc" not in data:
@@ -2446,8 +2448,24 @@ def _raise_for_store_error(result: dict) -> None:
 # =============================================================================
 
 @app.post("/api/documents/new")
-async def api_new_document():
-    return doc_store.new_document()
+async def api_new_document(request: Request):
+    doc_id = request.headers.get("x-paper-doc-id") or None
+    document = doc_store.new_document(doc_id)
+    activated = doc_store.set_active_document(document["id"])
+    _raise_for_store_error(activated)
+    return document
+
+
+@app.get("/api/documents/active")
+async def api_get_active_document():
+    return doc_store.get_active_document()
+
+
+@app.put("/api/documents/{doc_id}/active")
+async def api_set_active_document(doc_id: str):
+    result = doc_store.set_active_document(doc_id)
+    _raise_for_store_error(result)
+    return result
 
 
 @app.get("/api/documents/{doc_id}")
@@ -2467,6 +2485,8 @@ async def api_open_document(doc_id: str, body: dict):
     file_path = body.get("file_path") or body.get("filePath")
     result = doc_store.open_document(doc_id, file_path or "")
     _raise_for_store_error(result)
+    activated = doc_store.set_active_document(result["id"])
+    _raise_for_store_error(activated)
     return result
 
 

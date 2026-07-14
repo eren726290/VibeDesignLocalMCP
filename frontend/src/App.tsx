@@ -30,7 +30,7 @@ export function App() {
   useEffect(() => {
     const init = async () => {
       try {
-        const doc = await bridge.getDocument(docIdRef.current);
+        const doc = await bridge.getActiveDocument();
         setDocument(doc as Document);
         const startupTransform = computeStartupFocusTransform(doc as Document);
         if (startupTransform && !hasFocusedStartupRef.current) {
@@ -69,7 +69,9 @@ export function App() {
       if (syncManager.pauseRef.count > 0) return;
 
       try {
-        const doc = await bridge.getDocument(docIdRef.current);
+        const activeDocId = useEditorStore.getState().document?.id || docIdRef.current;
+        docIdRef.current = activeDocId;
+        const doc = await bridge.getDocument(activeDocId);
         if (!doc) return;
         // Server is source of truth — always overwrite local state
         useEditorStore.getState().setDocument(doc as Document);
