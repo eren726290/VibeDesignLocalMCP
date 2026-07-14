@@ -4,7 +4,7 @@
 
 VibeDesignLocalMCP-2 is an agent-first local design workspace. The core product is not a full manual design tool clone. The priority is a reliable document pipeline that lets an agent create, inspect, patch, validate, save/open, and export HTML/SVG designs with stable node identity.
 
-The active baseline is Tasks 1-42. Tasks 43-66 from the abandoned planner session are not part of this roadmap.
+The active baseline is Tasks 1-52. Tasks 43-66 from the abandoned planner session are not part of this roadmap; the current Tasks 43-52 are the rebuilt stability, MCP schema, and documentation track.
 
 ## Active Sources
 
@@ -88,6 +88,10 @@ The accepted foundation now includes:
 - disabled unsafe manual creation/drag/resize paths
 - safer selection, layer/canvas sync, and right inspector identity
 - SVG export/readback fixes through Task 42
+- SVG save/open round-trip regression coverage
+- MCP tool schema audit, schema text corrections, and regression coverage
+- live MCP agent workflow validation
+- active documentation moved under `doc/` with source-audited reference docs
 
 ## SVG Model
 

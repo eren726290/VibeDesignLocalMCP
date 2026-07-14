@@ -249,8 +249,8 @@ No behavior changes.
 
 Deliverable:
 
-- update `doc/vibe-design-mcp-tool-agent-context.md` with audit results
-- or create a separate `doc/vibe-design-mcp-tool-schema-audit-report.md`
+- update `doc/MCP-tool-schema-audit/vibe-design-mcp-tool-agent-context.md` with audit results
+- or create a separate `doc/MCP-tool-schema-audit/vibe-design-mcp-tool-schema-audit-report.md`
 
 Scope:
 

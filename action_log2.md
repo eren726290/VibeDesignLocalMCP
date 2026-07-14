@@ -316,6 +316,113 @@ OpenCode does not write this file. Codex reviews completed work and records the 
 - Notes:
   - Duplicate `test-page-001` artboards are not treated as an issue for this checkpoint.
 
+### Task 50 Review - Reference Docs Audit
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 50 audit of the new reference docs against current source.
+- Files reviewed:
+  - `task.md`
+  - `doc/reference/document-model.md`
+  - `doc/reference/mcp-tool-contracts.md`
+  - `doc/reference/frontend-safety.md`
+- Files changed by OpenCode:
+  - `task.md`
+- Review result: accepted.
+- Accepted audit result:
+  - `doc/reference/frontend-safety.md` is accurate against current frontend source.
+  - `doc/reference/document-model.md` is accurate; only a minor page-ID reopen nuance was noted and does not require a doc change.
+  - `doc/reference/mcp-tool-contracts.md` needs two doc-only corrections for Task 51:
+    - add `get_selection` and `get_computed_styles` to the inspection section
+    - note that `get_page_html.pretty` is accepted by schema but ignored by the handler
+- Verification:
+  - `git diff --check -- task.md` passed.
+- Notes:
+  - Task 50 was audit-only and did not change source behavior.
+
+### Task 51 Review - Correct MCP Tool Contracts Reference
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 51 doc-only correction to MCP tool contracts reference.
+- Files reviewed:
+  - `doc/reference/mcp-tool-contracts.md`
+  - `task.md`
+- Files changed by OpenCode:
+  - `doc/reference/mcp-tool-contracts.md`
+  - `task.md`
+- Review result: accepted.
+- Accepted changes:
+  - Added `get_selection` and `get_computed_styles` to the inspection tools list.
+  - Added a note that `get_page_html` accepts optional `pretty` in schema, but the active handler ignores it, so agents should not rely on pretty formatting from `get_page_html`.
+- Verification:
+  - `git diff --check -- doc/reference/mcp-tool-contracts.md task.md` passed.
+- Notes:
+  - No source code, archive files, or unrelated docs were changed.
+
+### Task 52 Review - Documentation Link And Path Sanity Check
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 52 documentation path sanity check after moving active docs under `doc/`.
+- Files reviewed:
+  - `doc/checkpoints/checkpoint-report.md`
+  - `doc/MCP-tool-schema-audit/vibe-design-mcp-tool-schema-audit-roadmap.md`
+  - `task.md`
+- Files changed by OpenCode:
+  - `doc/checkpoints/checkpoint-report.md`
+  - `doc/MCP-tool-schema-audit/vibe-design-mcp-tool-schema-audit-roadmap.md`
+  - `task.md`
+- Review result: accepted.
+- Accepted changes:
+  - Updated two stale `architecture.md` references in `doc/checkpoints/checkpoint-report.md` to `doc/architecture.md`.
+  - Updated two stale MCP audit doc paths in `doc/MCP-tool-schema-audit/vibe-design-mcp-tool-schema-audit-roadmap.md` to the active `doc/MCP-tool-schema-audit/` locations.
+  - Left historical `task.md` references, forbidden `action_log2.md` references, sibling-relative `doc/README.md` references, and checkpoint self-reference unchanged as intended.
+- Verification:
+  - `git diff --check -- doc task.md` passed.
+- Notes:
+  - Task 52 was documentation-only and did not change source behavior.
+
+### Task 53 Review - write_html Schema Visual Quality Diagnosis
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 53 diagnose-only audit of `write_html` schema wording and SVG/chart visual quality.
+- Files reviewed:
+  - `task.md`
+- Files changed by OpenCode:
+  - `task.md`
+- Review result: accepted.
+- Accepted audit result:
+  - Current `write_html` behavior does not need handler, parser, frontend, `set_text_content`, `update_styles`, or `update_svg_attributes` changes.
+  - The likely regression is schema wording: Task 45 removed the old `inline styles` cue and the `outermost element fills the artboard automatically` guidance.
+  - Task 54 should retune only the `write_html` schema text to restore rich inline HTML/SVG guidance while preserving accurate mode, target, response, no-op, and test-locked terms.
+- Verification:
+  - `python3 tests/test_mcp_tool_schema.py` passed.
+  - `PYTHONPATH=backend` tool count check returned 30.
+  - `git diff --check -- task.md` passed.
+- Notes:
+  - Task 53 was audit-only.
+
+### Task 54 Review - write_html Schema Visual Quality Retune
+
+- Actor: Codex
+- Summary: Reviewed OpenCode Task 54 schema-text retune for `write_html`.
+- Files reviewed:
+  - `backend/main.py`
+  - `task.md`
+- Files changed by OpenCode:
+  - `backend/main.py`
+  - `task.md`
+- Review result: accepted.
+- Accepted changes:
+  - Updated only the `write_html` MCP schema description to mention nested HTML, inline SVG, rich chart/diagram markup, inline CSS, and SVG depth details such as gradients, filters, masks, `clipPath`, groups, paths, text, and `foreignObject`.
+  - Updated only the `write_html.html` property description to restore inline CSS guidance, outermost-wrapper artboard fill guidance, and visual-depth cues such as layered backgrounds, shadows, borders, subtle gradients, highlights, texture, and surface treatment.
+  - Preserved mode, targeting, response-shape, zero-parse no-op, required-field, and 30-tool inventory behavior.
+- Verification:
+  - `python3 -m py_compile backend/main.py` passed.
+  - `python3 tests/test_mcp_tool_schema.py` passed.
+  - `PYTHONPATH=backend` tool count check returned 30.
+  - `git diff --check -- backend/main.py task.md` passed.
+- Notes:
+  - No handler, parser, frontend, `set_text_content`, `update_styles`, `update_svg_attributes`, archive, or other MCP schema changes were made.
+
 ### Historical Merge Log - State Drift, Workspace Sync, and Native Canvas Layout Fixes
 
 - Actor: Codex

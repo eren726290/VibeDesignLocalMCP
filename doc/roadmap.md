@@ -2,9 +2,9 @@
 
 ## Baseline
 
-Current accepted baseline: Tasks 1-42.
+Current accepted baseline: Tasks 1-52.
 
-This project restarted from the stable Task 41 state, then Task 42 fixed SVG attributes being dropped when reopening saved Paper HTML. Tasks 43-66 from the abandoned session are intentionally excluded.
+This project restarted from the stable Task 41 state, then Task 42 fixed SVG attributes being dropped when reopening saved Paper HTML. Current Tasks 43-52 are the rebuilt stability, MCP schema, workflow validation, and documentation track. Tasks 43-66 from the abandoned session are intentionally excluded.
 
 ## Built
 
@@ -43,6 +43,20 @@ SVG foundation:
 - backend node IDs are decoupled from native HTML/SVG IDs.
 - Paper HTML open now preserves SVG attrs.
 
+Testing and schema foundation:
+
+- SVG Paper HTML save/open round-trip regression test exists.
+- MCP tool schema regression test covers 30 tools, route coverage, required fields, and priority schema terms.
+- Priority MCP tool schemas were audited and corrected for agent usability.
+- A live MCP workflow test validated write, inspect, edit, diagnose, and export/readback behavior.
+
+Documentation foundation:
+
+- Active docs now live under `doc/`.
+- Reference docs cover document model, MCP tool contracts, and frontend safety.
+- Reference docs were audited against current source.
+- Moved-doc links were sanity checked after the docs reorganization.
+
 ## Current Guardrails
 
 - No Design Mode.
@@ -58,17 +72,17 @@ SVG foundation:
 
 ## Next Priorities
 
-### 1. Stabilize Tests Around Existing Foundation
+### 1. Expand Tests Around Existing Foundation
 
-Add focused tests for what already exists before adding features.
+Add focused tests for current behavior that is not yet covered.
 
 Candidate tasks:
 
-- Add backend tests for Paper HTML save/open SVG attr round-trip.
 - Add tests for native DOM ID versus backend node ID separation.
 - Add tests for `update_svg_attributes` export/readback.
 - Add tests for `validate_svg` no-mutation behavior.
 - Add tests for `write_html` target modes on nested structures.
+- Add tests for `get_page_html.pretty` schema/handler alignment if that parameter is corrected or removed later.
 
 ### 2. Tighten SVG Mutation Contracts
 
@@ -101,14 +115,14 @@ Candidate tasks:
 - Improve inspector clarity only where it helps exact node targeting.
 - Avoid broad UI redesign.
 
-### 5. Documentation Cleanup
+### 5. Documentation Maintenance
 
-Make docs reflect the reset.
+Keep docs current only when behavior changes.
 
 Candidate tasks:
 
-- Update README with current run commands and Linux/Fedora-neutral notes.
-- Add a short clean-runtime note for `~/.paper_clone/data`.
+- Update `doc/README.md` if run commands or active doc layout changes.
+- Add a short clean-runtime note for `~/.paper_clone/data` if runtime cleanup becomes a repeated workflow.
 - Keep old long-form docs archived.
 
 ## Deferred
@@ -122,19 +136,13 @@ Candidate tasks:
 - Full PDF/export expansion beyond current stable paths.
 - Packaging and desktop polish.
 
-## Suggested Next Task
+## Suggested Next Task Direction
 
-Task 43 should be a test/stability task, not a feature task.
+The next task should be a small product or test foundation task, not another broad documentation round.
 
-Recommended Task 43:
+Good candidates:
 
-```text
-Add focused backend regression tests for SVG Paper HTML save/open round-trip.
-```
-
-Why:
-
-- Task 42 fixed a real bug.
-- The fix is important enough to preserve with tests.
-- It is narrow, backend-only, and PC-testable.
-- It reinforces the foundation before any new feature work.
+- add a focused test for native DOM ID versus backend node ID separation
+- add a focused test for `update_svg_attributes` export/readback
+- decide whether to remove or implement the dead `get_page_html.pretty` parameter
+- run a PC checkpoint before any visible frontend changes

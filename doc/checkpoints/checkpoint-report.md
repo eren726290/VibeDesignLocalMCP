@@ -183,7 +183,7 @@ This checkpoint does not mean the frontend is complete. It means the project has
 - `frontend/src/panels/PropertyPanel.tsx`
 - `frontend/src/store/editorStore.ts`
 - `frontend/src/toolbar/Toolbar.tsx`
-- `architecture.md`
+- `doc/architecture.md`
 - `to-do.md`
 - `action-log.md`
 - `design-mode.md`
@@ -306,7 +306,7 @@ This checkpoint still does not mean the app is complete. It means the agent-firs
 - `frontend/src/panels/LayerPanel.tsx` (review context)
 - `frontend/src/store/editorStore.ts` (review context)
 - `frontend/src/types.ts` (review context)
-- `architecture.md`
+- `doc/architecture.md`
 - `to-do.md`
 - `design-mode.md`
 - `action-log.md`
