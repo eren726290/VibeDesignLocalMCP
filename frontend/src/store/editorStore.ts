@@ -72,11 +72,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const pageIndex = document.pages.findIndex((page) =>
       page.elements.some((element) => element.id === sel.nodeId)
     );
+    const nextDocument = pageIndex >= 0 ? { ...document, current_page: pageIndex } : document;
     set({
       selection: sel,
       selectedArtboardId: null,
-      document: pageIndex >= 0 ? { ...document, current_page: pageIndex } : document,
+      document: nextDocument,
     });
+    if (pageIndex >= 0) bridge.setCurrentPage(document.id, pageIndex).catch(() => {});
   },
 
   selectArtboard: (id) => {
@@ -86,11 +88,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
     const pageIndex = document.pages.findIndex((page) => page.id === id);
+    const nextDocument = pageIndex >= 0 ? { ...document, current_page: pageIndex } : document;
     set({
       selectedArtboardId: id,
       selection: null,
-      document: pageIndex >= 0 ? { ...document, current_page: pageIndex } : document,
+      document: nextDocument,
     });
+    if (pageIndex >= 0) bridge.setCurrentPage(document.id, pageIndex).catch(() => {});
   },
 
   clearSelection: () => set({ selection: null, selectedArtboardId: null }),
@@ -169,7 +173,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
     syncManager.pauseSync();
     set({ document: updated });
-    bridge.createElement(document.id, element as unknown as Record<string, unknown>)
+    bridge.createElement(
+      document.id,
+      element as unknown as Record<string, unknown>,
+      document.pages[document.current_page]?.id,
+    )
       .catch(() => {})
       .finally(() => syncManager.resumeSync());
     get().pushHistory();

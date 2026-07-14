@@ -407,3 +407,181 @@ agent creates fresh page
 -> agent edits same page
 -> compare backend document ID, page ID, node ID, coordinates, and styles
 ```
+
+---
+
+# VibeDesignLocalMCP Checkpoint - Tasks 33-49
+
+Date: 2026-07-06
+
+## Status
+
+Test on PC now.
+
+The previous completed PC test covered Tasks 19-32 and passed. Tasks 33-49 then changed the SVG/parser/export pipeline, added SVG mutation/validation support, fixed SVG save/open round-trip coverage, corrected the Vite dev-server binding for this Termux/proot environment, audited and improved MCP tool schemas, added schema regression tests, and completed one real MCP agent workflow validation.
+
+This checkpoint is not about new UI features. It is a foundation checkpoint: verify that the agent-first MCP pipeline remains reliable in the actual browser + backend + frontend environment.
+
+## What Changed Since Task 32
+
+- SVG representation was diagnosed before implementation.
+- HTML export now emits SVG attributes as native XML attributes instead of CSS style entries.
+- JSX export now emits SVG attributes as React-compatible props.
+- Canonical SVG tag output was improved for tags such as `linearGradient`, `clipPath`, `foreignObject`, and `textPath`.
+- Native HTML/SVG `id` attrs are preserved separately from generated backend node IDs:
+  - backend targeting uses generated `data-paper-node` IDs
+  - native DOM/SVG IDs live in `style["id"]`
+  - export/readback preserves native IDs
+- `update_svg_attributes` was added for direct SVG/XML attribute mutation by generated backend node ID.
+- `validate_svg` was added as a read-only SVG diagnostic tool.
+- SVG validation was tightened to avoid false missing-ref reports for color hex values.
+- `DocumentStore._parse_element_tree()` was fixed so reopening saved Paper HTML preserves SVG/XML attrs.
+- A regression test now covers Paper HTML save/open SVG attr round-trip.
+- Vite dev server was fixed for the current Termux/proot environment by binding to `127.0.0.1`.
+- MCP tool schemas were audited against the full pipeline:
+  - schema
+  - `handle_mcp_tool` route
+  - backend handler
+  - document/parser/export behavior
+  - response shape
+  - real agent follow-up workflow
+- MCP schema text was improved for high-impact editing tools:
+  - `write_html`
+  - `update_styles`
+  - `set_text_content`
+  - `update_svg_attributes`
+- MCP schema text was improved for inspection/export/diagnostic tools:
+  - `get_node_info`
+  - `get_html`
+  - `get_overflow_report`
+- The dead `pretty` parameter was removed from the active `get_html` schema because the handler ignored it.
+- MCP schema text was improved for structural tools:
+  - `move_nodes`
+  - `duplicate_nodes`
+  - `delete_nodes`
+- `tests/test_mcp_tool_schema.py` was added to lock the 30-tool schema inventory, route coverage, priority schema terms, required fields, and `get_html.pretty` removal.
+- A real MCP workflow test passed using:
+  - `write_html`
+  - `get_node_info`
+  - `get_html`
+  - `set_text_content`
+  - `update_styles`
+  - `update_svg_attributes`
+  - `get_overflow_report`
+
+## Files Touched In This Checkpoint Range
+
+- `backend/main.py`
+- `backend/document.py`
+- `backend/parse_html.py`
+- `frontend/vite.config.ts`
+- `tests/test_svg_save_open_roundtrip.py`
+- `tests/test_mcp_tool_schema.py`
+- `task.md`
+- `action_log2.md`
+- `checkpoint-report.md`
+- `doc/MCP-tool-schema-audit/mcp-tool-audit-final-report.md`
+- `doc/MCP-tool-schema-audit/vibe-design-mcp-tool-agent-context.md`
+- `doc/MCP-tool-schema-audit/vibe-design-mcp-tool-schema-audit-report.md`
+- `doc/MCP-tool-schema-audit/vibe-design-mcp-tool-schema-audit-roadmap.md`
+
+## PC Test Recommendation
+
+Yes. Run a PC checkpoint test for Tasks 33-49 before assigning the next feature layer.
+
+The reason is that Tasks 33-49 changed the reliability layer agents depend on: SVG parsing/export, SVG mutation, save/open preservation, schema clarity, route coverage, and real workflow confirmation. A PC test should confirm the backend, frontend, MCP server, and agent all agree in a real session.
+
+## PC Test Checklist - Tasks 33-49
+
+1. Start backend and frontend on PC.
+2. Confirm frontend starts with normal `npm run dev` and binds to a localhost URL without needing `--host 127.0.0.1`.
+3. Open the frontend in a normal desktop browser.
+4. Run `python3 tests/test_svg_save_open_roundtrip.py` and confirm it passes.
+5. Run `python3 tests/test_mcp_tool_schema.py` and confirm it prints `All MCP tool schema regression checks passed.`
+6. Create a fresh artboard/page through MCP.
+7. Use `write_html` to add mixed HTML/SVG content with:
+   - nested HTML structure
+   - visible text
+   - native HTML `id`
+   - inline SVG root with native `id`
+   - at least one editable SVG child such as `rect` or `path`
+   - at least one SVG ref case such as `linearGradient`, `clipPath`, or `textPath` if practical
+8. Confirm the frontend renders the HTML/SVG content.
+9. Select or inspect SVG root and child nodes where the frontend allows it.
+10. Confirm layer/inspector identity uses generated backend node IDs, not native DOM/SVG IDs.
+11. Run `get_tree_summary` and confirm generated backend IDs appear in the tree.
+12. Run `get_node_info` on HTML and SVG nodes and confirm:
+    - generated backend ID is the target ID
+    - native `id` is preserved in `style["id"]` where applicable
+    - children/parent/page fields are useful for follow-up edits
+13. Run `get_children` on an SVG root and confirm direct child IDs are generated backend IDs.
+14. Run `get_svg_summary` and confirm SVG primitives are visible enough for agent inspection.
+15. Run `validate_svg` on the SVG root and confirm valid refs are not falsely reported missing.
+16. Use `update_svg_attributes` on a generated backend SVG node ID and confirm the frontend updates after polling/sync.
+17. Use `set_text_content` on a selected text-bearing node and confirm only that node changes.
+18. Use `write_html` with `replace` or `replace-children` on one selected section and confirm only that section changes.
+19. Use `update_styles` on one or more nodes and confirm styles merge without wiping unrelated style keys.
+20. Use `get_overflow_report` and confirm the response includes checked node count, overflow count, and usable node/geometry context when overflow exists.
+21. Use `get_html` without `pretty` and confirm final readback includes:
+    - text edit
+    - section replacement
+    - style edit
+    - SVG attr edit
+    - correct page/subtree target
+22. Run `get_page_html` and confirm SVG attrs export as XML attrs, not CSS style entries.
+23. Run `get_jsx` and confirm SVG attrs export as JSX props such as `viewBox`, `strokeWidth`, and `startOffset` where applicable.
+24. Save and reopen the document.
+25. After reopen, confirm:
+    - generated backend node IDs remain targetable through `data-paper-node`
+    - native IDs remain in exported output
+    - SVG/XML attrs survive reopen
+    - no duplicate backend node IDs are introduced
+26. Run a short real agent workflow:
+    - agent creates a nested HTML/SVG section
+    - agent inspects exact nodes
+    - agent edits text by node ID
+    - agent edits SVG attrs by node ID
+    - agent runs overflow diagnostics
+    - agent exports/readbacks the final result
+27. Confirm the agent does not need to guess tool parameters after the schema audit.
+28. Confirm mutation responses provide enough IDs and response fields for precise follow-up edits.
+29. Confirm no frontend regression from Tasks 19-32 appears while testing the Tasks 33-49 workflow.
+30. Record pass/fail notes and any issue with exact page ID, node ID, tool call, response, and frontend behavior.
+
+## Known Limitations At This Checkpoint
+
+- Frontend is still not product-complete.
+- Design Mode is explicitly not being built right now.
+- SVG-native visual selection/highlight may still be limited.
+- Manual shape/text/frame creation tools remain intentionally disabled.
+- `export_pdf` remains postponed.
+- The codebase still has accumulated uncommitted changes across many tasks, so `git diff` must be interpreted by task scope.
+- Duplicate native IDs can exist intentionally for SVG validation tests. Do not treat native-ID duplicates as backend node-ID duplicates.
+- Duplicate `test-page-001` artboards reported during Task 49 are not treated as an issue for this checkpoint.
+
+## Pass Criteria
+
+The Tasks 33-49 PC checkpoint passes if:
+
+- both regression tests pass
+- frontend starts and renders the test page
+- generated backend IDs and native DOM/SVG IDs remain separate
+- SVG mutation, validation, export, save, and reopen behave as expected
+- `get_html` works without `pretty`
+- the real agent workflow can complete without schema confusion
+- final readback matches the intended edits
+
+## Recommended Next Step
+
+Run this PC checkpoint before starting the next feature.
+
+If it passes, continue with small foundation or polish tasks. If it fails, diagnose the exact failing pipeline hop before assigning a fix:
+
+```text
+schema/tool call
+-> route
+-> handler
+-> document model
+-> frontend render or export/readback
+-> agent follow-up behavior
+```
